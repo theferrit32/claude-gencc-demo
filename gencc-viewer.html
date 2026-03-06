@@ -48,6 +48,10 @@
   .gene-link:hover { text-decoration: underline; }
   .submitters { max-width: 350px; }
   .max-rows-note { padding: 8px 10px; background: #ffeaa7; font-size: 0.8rem; text-align: center; }
+  .conflict-summary { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .conflict-summary h3 { font-size: 0.95rem; margin-bottom: 10px; }
+  .conflict-summary table { width: auto; }
+  .conflict-summary td, .conflict-summary th { padding: 4px 12px; }
   .group-editor { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: none; }
   .group-editor.visible { display: block; }
   .group-editor h3 { font-size: 0.9rem; margin-bottom: 10px; }
@@ -812,11 +816,57 @@ function renderConflicts(container, filterVal, clusteringEnabled) {
     allRows.length.toLocaleString() + ' submissions, ' +
     conflictKeys.length.toLocaleString() + conflictWord;
 
-  // Step 5: Render
+  // Step 5: Build per-submitter conflict summary
+  // For each submitter on the "other" (non-strong) side, count how many
+  // conflicting triples they appear in and tally their classification usage.
+  var submitterStats = {};  // submitter -> { total: N, classes: { cls: count } }
+  for (var c = 0; c < conflictKeys.length; c++) {
+    var tri = triples[conflictKeys[c]];
+    for (var sub in tri.other) {
+      if (!submitterStats[sub]) submitterStats[sub] = { total: 0, classes: {} };
+      submitterStats[sub].total++;
+      for (var cls in tri.other[sub]) {
+        submitterStats[sub].classes[cls] = (submitterStats[sub].classes[cls] || 0) + 1;
+      }
+    }
+  }
+
+  // Step 6: Render
   if (conflictKeys.length === 0) {
     container.innerHTML = '<div class="section"><div class="section-header"><h2>Conflicts</h2><div><span class="count">0 conflicts</span></div></div></div>';
     return;
   }
+
+  // Render submitter summary table
+  var summarySubmitters = Object.keys(submitterStats).sort(function(a, b) {
+    return submitterStats[b].total - submitterStats[a].total;
+  });
+  var allClasses = {};
+  for (var si = 0; si < summarySubmitters.length; si++) {
+    var sc = submitterStats[summarySubmitters[si]].classes;
+    for (var cl in sc) allClasses[cl] = 1;
+  }
+  var classNames = Object.keys(allClasses).sort();
+
+  var summaryDiv = document.createElement('div');
+  summaryDiv.className = 'conflict-summary';
+  var shtml = '<h3>Conflict-causing submissions by submitter</h3>';
+  shtml += '<table><thead><tr><th>Submitter</th><th>Conflicts</th>';
+  for (var ci = 0; ci < classNames.length; ci++) shtml += '<th>' + escHtml(classNames[ci]) + '</th>';
+  shtml += '</tr></thead><tbody>';
+  for (var si = 0; si < summarySubmitters.length; si++) {
+    var name = summarySubmitters[si];
+    var ss = submitterStats[name];
+    shtml += '<tr><td>' + escHtml(name) + '</td><td>' + ss.total + '</td>';
+    for (var ci = 0; ci < classNames.length; ci++) {
+      var cnt = ss.classes[classNames[ci]] || 0;
+      shtml += '<td>' + (cnt || '') + '</td>';
+    }
+    shtml += '</tr>';
+  }
+  shtml += '</tbody></table>';
+  summaryDiv.innerHTML = shtml;
+  container.appendChild(summaryDiv);
 
   var section = document.createElement('div');
   section.className = 'section';
