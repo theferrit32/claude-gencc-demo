@@ -48,10 +48,15 @@
   .gene-link:hover { text-decoration: underline; }
   .submitters { max-width: 350px; }
   .max-rows-note { padding: 8px 10px; background: #ffeaa7; font-size: 0.8rem; text-align: center; }
-  .conflict-summary { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-  .conflict-summary h3 { font-size: 0.95rem; margin-bottom: 10px; }
-  .conflict-summary table { width: auto; }
-  .conflict-summary td, .conflict-summary th { padding: 4px 12px; }
+  .conflict-summary, .cluster-overlap-summary { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .conflict-summary h3, .cluster-overlap-summary h3 { font-size: 0.95rem; margin-bottom: 0; cursor: pointer; user-select: none; }
+  .conflict-summary h3 .arrow, .cluster-overlap-summary h3 .arrow { font-size: 0.8rem; transition: transform 0.2s; display: inline-block; margin-right: 4px; }
+  .conflict-summary h3.collapsed .arrow, .cluster-overlap-summary h3.collapsed .arrow { transform: rotate(-90deg); }
+  .conflict-summary .summary-body, .cluster-overlap-summary .summary-body { margin-top: 10px; }
+  .conflict-summary .summary-body.hidden, .cluster-overlap-summary .summary-body.hidden { display: none; }
+  .conflict-summary table, .cluster-overlap-summary table { width: auto; }
+  .conflict-summary td, .conflict-summary th, .cluster-overlap-summary td, .cluster-overlap-summary th { padding: 4px 12px; }
+  .cluster-overlap-summary td.cluster-ids { font-size: 0.75rem; max-width: 600px; word-break: break-word; }
   .group-editor { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: none; }
   .group-editor.visible { display: block; }
   .group-editor h3 { font-size: 0.9rem; margin-bottom: 10px; }
@@ -93,7 +98,10 @@
   .cluster-review .cr-controls label { font-size: 0.82rem; display: flex; align-items: center; gap: 4px; }
   .cr-stats { font-size: 0.82rem; color: #636e72; }
   .blacklist-section { margin-bottom: 16px; }
-  .blacklist-section h4 { font-size: 0.85rem; margin-bottom: 6px; }
+  .blacklist-section h4 { font-size: 0.85rem; margin-bottom: 6px; cursor: pointer; user-select: none; }
+  .blacklist-section h4 .arrow { font-size: 0.8rem; transition: transform 0.2s; display: inline-block; margin-right: 4px; }
+  .blacklist-section h4.collapsed .arrow { transform: rotate(-90deg); }
+  .blacklist-section .bl-body.hidden { display: none; }
   .blacklist-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; font-size: 0.78rem; background: #e17055; color: #fff; cursor: pointer; margin: 2px; }
   .blacklist-tag:hover { opacity: 0.85; }
   .cluster-card { border: 1px solid #dfe6e9; border-radius: 6px; margin-bottom: 8px; padding: 10px 14px; }
@@ -113,6 +121,11 @@
   .btn-blacklist:hover { background: #e17055; color: #fff; }
   .disease-cluster { border-bottom: 1px dashed #dfe6e9; cursor: help; }
   .hidden-ctrl { display: none; }
+  #auto-resolve-overlaps { font-size: 0.8rem; padding: 4px 10px; border: 1px solid #b2bec3; border-radius: 4px; background: #fff; cursor: pointer; }
+  #auto-resolve-overlaps:hover:not(:disabled) { background: #dfe6e9; }
+  #auto-resolve-overlaps:disabled { opacity: 0.4; cursor: default; }
+  #clear-blacklist { font-size: 0.75rem; padding: 2px 8px; border: 1px solid #b2bec3; border-radius: 4px; background: #fff; cursor: pointer; margin-left: 8px; vertical-align: middle; }
+  #clear-blacklist:hover { background: #dfe6e9; }
 </style>
 </head>
 <body>
@@ -151,6 +164,7 @@
         <option value="2">2 hops</option>
         <option value="3">3 hops</option>
       </select>
+      <button id="auto-resolve-overlaps" disabled>Auto-resolve overlaps</button>
     </div>
     <div>
       <label for="filter">Filter gene:</label>
@@ -327,6 +341,7 @@ function loadData(text) {
     document.getElementById('tab-submissions').appendChild(t);
   }
   if (hierarchyLoaded) recomputeClusters();
+  updateAutoResolveBtn();
   render();
 }
 
@@ -397,6 +412,7 @@ function loadHierarchy(jsonText) {
     '<p>MONDO hierarchy loaded: ' + nodeCount.toLocaleString() + ' disease nodes.</p>';
   document.getElementById('cluster-ctrl').classList.remove('hidden-ctrl');
   document.getElementById('tab-btn-cluster').style.display = '';
+  updateAutoResolveBtn();
 
   if (allRows) {
     recomputeClusters();
@@ -559,6 +575,84 @@ function recomputeClusters() {
   }
 }
 
+function autoResolveOverlaps() {
+  var MAX_ROUNDS = 20;
+
+  for (var round = 0; round < MAX_ROUNDS; round++) {
+    // Step 1: Detect overlaps — bucket by gene+clusteredDisease+moi
+    var buckets = {};
+    for (var i = 0; i < allRows.length; i++) {
+      var row = allRows[i];
+      if (!row.diseaseCurie || row.diseaseCurie.indexOf('MONDO:') !== 0) continue;
+      var numericId = row.diseaseCurie.replace('MONDO:', '');
+      var diseaseKey = row.disease;
+      if (clusterMap[row.gene]) {
+        var clusterId = clusterMap[row.gene][numericId];
+        if (clusterId) {
+          var ci = clusterInfo[row.gene + '\t' + clusterId];
+          if (ci) diseaseKey = ci.label;
+        }
+      }
+      var bkey = row.gene + '\t' + diseaseKey + '\t' + row.moi;
+      if (!buckets[bkey]) buckets[bkey] = { gene: row.gene, submitterIds: {} };
+      var b = buckets[bkey];
+      if (!b.submitterIds[row.submitter]) b.submitterIds[row.submitter] = {};
+      b.submitterIds[row.submitter][numericId] = true;
+    }
+
+    // Step 2: For each overlapping bucket, collect LCAs from its cluster(s),
+    // scored by how many overlapping buckets each LCA participates in.
+    var lcaScores = {};
+    var overlapCount = 0;
+    for (var bkey in buckets) {
+      var b = buckets[bkey];
+      var hasOverlap = false;
+      for (var sub in b.submitterIds) {
+        if (Object.keys(b.submitterIds[sub]).length > 1) { hasOverlap = true; break; }
+      }
+      if (!hasOverlap) continue;
+      overlapCount++;
+
+      var seenClusters = {};
+      for (var sub in b.submitterIds) {
+        for (var mid in b.submitterIds[sub]) {
+          if (clusterMap[b.gene] && clusterMap[b.gene][mid]) {
+            var ck = clusterMap[b.gene][mid];
+            if (!seenClusters[ck]) {
+              seenClusters[ck] = true;
+              var ci = clusterInfo[b.gene + '\t' + ck];
+              if (ci) {
+                for (var l = 0; l < ci.lcaIds.length; l++) {
+                  lcaScores[ci.lcaIds[l]] = (lcaScores[ci.lcaIds[l]] || 0) + 1;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (overlapCount === 0) break;
+
+    // Step 3: Blacklist all scored LCAs at once, then recompute.
+    // This resolves all current overlaps in one recompute pass.
+    // Subsequent rounds handle any new overlaps from re-formed clusters.
+    var added = false;
+    for (var lid in lcaScores) {
+      if (!lcaBlacklist[lid]) { lcaBlacklist[lid] = true; added = true; }
+    }
+    if (!added) break;
+
+    recomputeClusters();
+  }
+
+  saveBlacklist();
+  render();
+  if (document.querySelector('.tab-btn.active[data-tab="cluster-review"]')) {
+    renderClusterReview();
+  }
+}
+
 // ===================== Render =====================
 function render() {
   var grouping = document.getElementById('grouping').value;
@@ -569,6 +663,10 @@ function render() {
   container.innerHTML = '';
 
   var clusteringEnabled = hierarchyLoaded && parseInt(document.getElementById('cluster-hops').value) > 0;
+
+  if (clusteringEnabled) {
+    buildClusterOverlapSummary(container, filterVal);
+  }
 
   if (clsMode === 'conflicts') {
     renderConflicts(container, filterVal, clusteringEnabled);
@@ -750,6 +848,75 @@ function countTotal(bucket, keys) {
   return t;
 }
 
+// ===================== Cluster Overlap Summary =====================
+function buildClusterOverlapSummary(container, filterVal) {
+  // Bucket all rows by gene-disease(clustered)-moi, tracking submitter -> set of MONDO IDs
+  var buckets = {};  // key -> { gene, disease, moi, submitterIds: { submitter -> { mondoId: true } } }
+  for (var i = 0; i < allRows.length; i++) {
+    var row = allRows[i];
+    if (filterVal && row.gene.toUpperCase().indexOf(filterVal) === -1) continue;
+    if (!row.diseaseCurie || !row.diseaseCurie.startsWith('MONDO:')) continue;
+
+    var diseaseKey = row.disease;
+    if (clusterMap[row.gene]) {
+      var numericId = row.diseaseCurie.replace('MONDO:', '');
+      var clusterId = clusterMap[row.gene][numericId];
+      if (clusterId) {
+        var info = clusterInfo[row.gene + '\t' + clusterId];
+        if (info) diseaseKey = info.label;
+      }
+    }
+
+    var key = row.gene + '\t' + diseaseKey + '\t' + row.moi;
+    if (!buckets[key]) {
+      buckets[key] = { gene: row.gene, disease: diseaseKey, moi: row.moi, submitterIds: {} };
+    }
+    var b = buckets[key];
+    if (!b.submitterIds[row.submitter]) b.submitterIds[row.submitter] = {};
+    b.submitterIds[row.submitter][row.diseaseCurie.replace('MONDO:', '')] = true;
+  }
+
+  // For each bucket, find submitters with >1 distinct MONDO ID
+  var submitterStats = {};  // submitter -> { count: N, clusterIds: [] }
+  for (var key in buckets) {
+    var b = buckets[key];
+    var compoundId = b.gene + '-' + b.disease + '-' + b.moi;
+    for (var sub in b.submitterIds) {
+      var ids = Object.keys(b.submitterIds[sub]);
+      if (ids.length > 1) {
+        if (!submitterStats[sub]) submitterStats[sub] = { count: 0, clusterIds: [] };
+        submitterStats[sub].count += ids.length;
+        submitterStats[sub].clusterIds.push(compoundId);
+      }
+    }
+  }
+
+  var submitters = Object.keys(submitterStats);
+  if (submitters.length === 0) return;
+  submitters.sort(function(a, b) { return submitterStats[b].count - submitterStats[a].count; });
+
+  var div = document.createElement('div');
+  div.className = 'cluster-overlap-summary';
+  var heading = document.createElement('h3');
+  heading.className = 'collapsed';
+  heading.innerHTML = '<span class="arrow">&#9660;</span> Same-submitter cluster overlaps';
+  var body = document.createElement('div');
+  body.className = 'summary-body hidden';
+  heading.addEventListener('click', function() { heading.classList.toggle('collapsed'); body.classList.toggle('hidden'); });
+  var html = '<table><thead><tr><th>Submitter</th><th>Overlapping submissions</th><th>Affected clusters (gene-disease-moi)</th></tr></thead><tbody>';
+  for (var si = 0; si < submitters.length; si++) {
+    var name = submitters[si];
+    var ss = submitterStats[name];
+    html += '<tr><td>' + escHtml(name) + '</td><td>' + ss.count + '</td>';
+    html += '<td class="cluster-ids">' + ss.clusterIds.map(escHtml).join(', ') + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  body.innerHTML = html;
+  div.appendChild(heading);
+  div.appendChild(body);
+  container.appendChild(div);
+}
+
 // ===================== Conflict View =====================
 function renderConflicts(container, filterVal, clusteringEnabled) {
   var MAX_ROWS = 500;
@@ -850,8 +1017,13 @@ function renderConflicts(container, filterVal, clusteringEnabled) {
 
   var summaryDiv = document.createElement('div');
   summaryDiv.className = 'conflict-summary';
-  var shtml = '<h3>Conflict-causing submissions by submitter</h3>';
-  shtml += '<table><thead><tr><th>Submitter</th><th>Conflicts</th>';
+  var summaryHeading = document.createElement('h3');
+  summaryHeading.className = 'collapsed';
+  summaryHeading.innerHTML = '<span class="arrow">&#9660;</span> Conflict-causing submissions by submitter';
+  var summaryBody = document.createElement('div');
+  summaryBody.className = 'summary-body hidden';
+  summaryHeading.addEventListener('click', function() { summaryHeading.classList.toggle('collapsed'); summaryBody.classList.toggle('hidden'); });
+  var shtml = '<table><thead><tr><th>Submitter</th><th>Conflicts</th>';
   for (var ci = 0; ci < classNames.length; ci++) shtml += '<th>' + escHtml(classNames[ci]) + '</th>';
   shtml += '</tr></thead><tbody>';
   for (var si = 0; si < summarySubmitters.length; si++) {
@@ -865,7 +1037,9 @@ function renderConflicts(container, filterVal, clusteringEnabled) {
     shtml += '</tr>';
   }
   shtml += '</tbody></table>';
-  summaryDiv.innerHTML = shtml;
+  summaryBody.innerHTML = shtml;
+  summaryDiv.appendChild(summaryHeading);
+  summaryDiv.appendChild(summaryBody);
   container.appendChild(summaryDiv);
 
   var section = document.createElement('div');
@@ -1028,17 +1202,44 @@ function renderBlacklistSection() {
     blDiv.innerHTML = '';
     return;
   }
-  var html = '<h4>Blacklisted LCA terms (' + blKeys.length + '):</h4><div>';
+
+  blDiv.innerHTML = '';
+
+  var heading = document.createElement('h4');
+  heading.className = 'collapsed';
+  heading.innerHTML = '<span class="arrow">&#9660;</span> Blacklisted LCA terms (' + blKeys.length + '): ';
+  var clearBtn = document.createElement('button');
+  clearBtn.id = 'clear-blacklist';
+  clearBtn.textContent = 'Clear all';
+  heading.appendChild(clearBtn);
+
+  var body = document.createElement('div');
+  body.className = 'bl-body hidden';
+  var tagsHtml = '';
   for (var i = 0; i < blKeys.length; i++) {
     var id = blKeys[i];
     var lbl = mondoNodes[id] ? mondoNodes[id].l : id;
-    html += '<span class="blacklist-tag" data-id="' + escHtml(id) + '" title="Click to un-blacklist">' +
+    tagsHtml += '<span class="blacklist-tag" data-id="' + escHtml(id) + '" title="Click to un-blacklist">' +
       escHtml(lbl) + ' (MONDO:' + escHtml(id) + ') \u00d7</span>';
   }
-  html += '</div>';
-  blDiv.innerHTML = html;
-  // Wire un-blacklist clicks
-  var tags = blDiv.querySelectorAll('.blacklist-tag');
+  body.innerHTML = tagsHtml;
+
+  heading.addEventListener('click', function(e) {
+    if (e.target.id === 'clear-blacklist') return;
+    heading.classList.toggle('collapsed');
+    body.classList.toggle('hidden');
+  });
+
+  clearBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    lcaBlacklist = {};
+    saveBlacklist();
+    recomputeClusters();
+    render();
+    renderClusterReview();
+  });
+
+  var tags = body.querySelectorAll('.blacklist-tag');
   for (var t = 0; t < tags.length; t++) {
     tags[t].addEventListener('click', function() {
       delete lcaBlacklist[this.dataset.id];
@@ -1048,6 +1249,9 @@ function renderBlacklistSection() {
       renderClusterReview();
     });
   }
+
+  blDiv.appendChild(heading);
+  blDiv.appendChild(body);
 }
 
 function buildClusterTree(info) {
@@ -1382,12 +1586,22 @@ document.getElementById('reset-groups-btn').addEventListener('click', function()
   initGroups(); renderGroupEditor(); if (allRows) render();
 });
 
+function updateAutoResolveBtn() {
+  var btn = document.getElementById('auto-resolve-overlaps');
+  btn.disabled = !(hierarchyLoaded && allRows && allRows.length > 0 && parseInt(document.getElementById('cluster-hops').value) > 0);
+}
+
 // ===================== Control Change Handlers =====================
 document.getElementById('grouping').addEventListener('change', function() { if (allRows) render(); });
 document.getElementById('cluster-hops').addEventListener('change', function() {
   recomputeClusters();
+  updateAutoResolveBtn();
   if (allRows) render();
   if (document.getElementById('tab-cluster-review').classList.contains('active')) renderClusterReview();
+});
+document.getElementById('auto-resolve-overlaps').addEventListener('click', function() {
+  autoResolveOverlaps();
+  updateAutoResolveBtn();
 });
 var filterTimeout;
 document.getElementById('filter').addEventListener('input', function() {
