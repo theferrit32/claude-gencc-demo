@@ -97,10 +97,13 @@
   .cc-gene { font-weight: 700; color: #0984e3; margin-right: 8px; }
   .cc-label { font-weight: 600; }
   .cc-size { background: #dfe6e9; border-radius: 10px; padding: 1px 8px; font-size: 0.75rem; font-weight: 600; }
-  .cc-members { font-size: 0.8rem; color: #636e72; margin-bottom: 4px; }
   .cc-member-id { color: #b2bec3; font-size: 0.75rem; }
-  .cc-lca { font-size: 0.8rem; margin-top: 4px; }
-  .cc-lca-label { font-weight: 600; }
+  .cc-tree { font-size: 0.8rem; }
+  .cc-tree-row { display: flex; align-items: baseline; line-height: 1.6; }
+  .cc-tree-prefix { font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace; color: #b2bec3; white-space: pre; user-select: none; flex-shrink: 0; }
+  .cc-tree-lca { font-weight: 600; }
+  .cc-tree-member { color: #636e72; }
+  .cc-tree-annotation { color: #b2bec3; font-size: 0.75rem; margin-left: 4px; }
   .btn-blacklist { padding: 2px 6px; border: 1px solid #e17055; border-radius: 3px; background: #fff; color: #e17055; font-size: 0.72rem; cursor: pointer; margin-left: 6px; }
   .btn-blacklist:hover { background: #e17055; color: #fff; }
   .disease-cluster { border-bottom: 1px dashed #dfe6e9; cursor: help; }
@@ -806,6 +809,113 @@ function renderBlacklistSection() {
   }
 }
 
+function buildClusterTree(info) {
+  var nodeSet = {};
+  for (var i = 0; i < info.members.length; i++) {
+    var m = info.members[i];
+    nodeSet[m.id] = { isMember: true, isLCA: false, label: m.title };
+  }
+  for (var i = 0; i < info.lcaIds.length; i++) {
+    var lid = info.lcaIds[i];
+    if (nodeSet[lid]) {
+      nodeSet[lid].isLCA = true;
+    } else {
+      nodeSet[lid] = { isMember: false, isLCA: true, label: mondoNodes[lid] ? mondoNodes[lid].l : lid };
+    }
+  }
+
+  var allIds = Object.keys(nodeSet);
+  var parentOf = {};
+
+  for (var i = 0; i < allIds.length; i++) {
+    var nid = allIds[i];
+    var found = null;
+    var queue = [nid];
+    var visited = {};
+    visited[nid] = true;
+
+    while (queue.length > 0 && !found) {
+      var next = [];
+      for (var q = 0; q < queue.length; q++) {
+        var parents = mondoParents[queue[q]];
+        if (!parents) continue;
+        for (var p = 0; p < parents.length; p++) {
+          var pid = parents[p];
+          if (visited[pid]) continue;
+          visited[pid] = true;
+          if (nodeSet[pid]) { found = pid; break; }
+          next.push(pid);
+        }
+        if (found) break;
+      }
+      queue = next;
+    }
+    parentOf[nid] = found;
+  }
+
+  var childrenOf = {};
+  var roots = [];
+  for (var i = 0; i < allIds.length; i++) {
+    var nid = allIds[i];
+    var par = parentOf[nid];
+    if (par === null) {
+      roots.push(nid);
+    } else {
+      if (!childrenOf[par]) childrenOf[par] = [];
+      childrenOf[par].push(nid);
+    }
+  }
+
+  function sortByLabel(arr) {
+    arr.sort(function(a, b) {
+      var la = (nodeSet[a].label || '').toLowerCase();
+      var lb = (nodeSet[b].label || '').toLowerCase();
+      return la < lb ? -1 : la > lb ? 1 : 0;
+    });
+  }
+  sortByLabel(roots);
+  for (var pid in childrenOf) sortByLabel(childrenOf[pid]);
+
+  return { nodeSet: nodeSet, childrenOf: childrenOf, roots: roots };
+}
+
+function renderTreeHtml(tree) {
+  var lines = [];
+
+  function walk(nodeId, prefix, isLast, isRoot) {
+    var info = tree.nodeSet[nodeId];
+    var connector = isRoot ? '' : (isLast ? '\u2514\u2500\u2500 ' : '\u251C\u2500\u2500 ');
+    var nodeClass = info.isLCA ? 'cc-tree-lca' : 'cc-tree-member';
+    var idStr = ' <span class="cc-member-id">MONDO:' + escHtml(nodeId) + '</span>';
+    var annotation = '';
+    if (info.isLCA && info.isMember) annotation = ' <span class="cc-tree-annotation">(member + LCA)</span>';
+    else if (info.isLCA) annotation = ' <span class="cc-tree-annotation">(LCA)</span>';
+    var blBtn = '';
+    if (info.isLCA && !lcaBlacklist[nodeId]) {
+      blBtn = ' <button class="btn-blacklist" data-id="' + escHtml(nodeId) + '">blacklist</button>';
+    }
+
+    lines.push(
+      '<div class="cc-tree-row">' +
+      '<span class="cc-tree-prefix">' + escHtml(prefix + connector) + '</span>' +
+      '<span class="' + nodeClass + '">' + escHtml(info.label) + idStr + annotation + blBtn + '</span>' +
+      '</div>'
+    );
+
+    var children = tree.childrenOf[nodeId] || [];
+    var childPrefix = isRoot ? '' : (prefix + (isLast ? '    ' : '\u2502   '));
+    for (var c = 0; c < children.length; c++) {
+      walk(children[c], childPrefix, c === children.length - 1, false);
+    }
+  }
+
+  for (var r = 0; r < tree.roots.length; r++) {
+    walk(tree.roots[r], '', true, true);
+  }
+
+  return '<div class="cc-tree">' + lines.join('') + '</div>';
+}
+
 function renderClusterList() {
   var listDiv = document.getElementById('cr-list');
   var statsDiv = document.getElementById('cr-stats');
@@ -850,30 +960,13 @@ function renderClusterList() {
     var card = document.createElement('div');
     card.className = 'cluster-card';
 
-    var membersHtml = cl.info.members.map(function(m) {
-      return escHtml(m.title) + ' <span class="cc-member-id">MONDO:' + escHtml(m.id) + '</span>';
-    }).join('<br>');
-
-    var lcaHtml = '';
-    if (cl.info.lcaIds.length > 0) {
-      lcaHtml = '<div class="cc-lca">LCA: ';
-      for (var l = 0; l < cl.info.lcaIds.length; l++) {
-        var lid = cl.info.lcaIds[l];
-        var llbl = mondoNodes[lid] ? mondoNodes[lid].l : lid;
-        lcaHtml += '<span class="cc-lca-label">' + escHtml(llbl) + '</span> <span class="cc-member-id">MONDO:' + escHtml(lid) + '</span>';
-        if (!lcaBlacklist[lid]) {
-          lcaHtml += '<button class="btn-blacklist" data-id="' + escHtml(lid) + '">blacklist</button>';
-        }
-        if (l < cl.info.lcaIds.length - 1) lcaHtml += ', ';
-      }
-      lcaHtml += '</div>';
-    }
+    var tree = buildClusterTree(cl.info);
+    var treeHtml = renderTreeHtml(tree);
 
     card.innerHTML =
-      '<div class="cc-header"><div><span class="cc-gene">' + escHtml(cl.gene) + '</span> ' +
-      '<span class="cc-label">' + escHtml(cl.info.label) + '</span></div>' +
+      '<div class="cc-header"><div><span class="cc-gene">' + escHtml(cl.gene) + '</span></div>' +
       '<span class="cc-size">' + cl.info.members.length + ' diseases</span></div>' +
-      '<div class="cc-members">' + membersHtml + '</div>' + lcaHtml;
+      treeHtml;
 
     listDiv.appendChild(card);
   }
