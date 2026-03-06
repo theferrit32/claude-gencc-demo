@@ -534,7 +534,7 @@ function recomputeClusters() {
           var c = geneDiseaseCount[gene + '\t' + members[m]] || 0;
           if (c > bestCount) { bestCount = c; bestTitle = idToTitle[members[m]] || members[m]; }
         }
-        label = bestTitle + ' (+' + (members.length - 1) + ' synonyms)';
+        label = bestTitle + ' (+' + (members.length - 1) + ' clustered)';
       }
 
       var memberDetails = members.map(function(mid) {
