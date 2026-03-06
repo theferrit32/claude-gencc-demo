@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GenCC Submissions Viewer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f6fa; color: #2d3436; padding: 20px; }
+  h1 { margin-bottom: 4px; font-size: 1.5rem; }
+  .subtitle { color: #636e72; margin-bottom: 16px; font-size: 0.9rem; }
+  .controls { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+  .controls label { font-weight: 600; font-size: 0.85rem; }
+  .controls select, .controls input[type="text"] { padding: 6px 10px; border: 1px solid #b2bec3; border-radius: 4px; font-size: 0.85rem; }
+  .controls input[type="text"] { width: 200px; }
+  #stats { color: #636e72; font-size: 0.85rem; }
+  .section { margin-bottom: 20px; }
+  .section-header { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px 8px 0 0; padding: 10px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; }
+  .section-header:hover { background: #f8f9fa; }
+  .section-header h2 { font-size: 1.1rem; }
+  .section-header .count { background: #dfe6e9; border-radius: 12px; padding: 2px 10px; font-size: 0.8rem; font-weight: 600; }
+  .section-header .arrow { transition: transform 0.2s; font-size: 0.8rem; }
+  .section-header.collapsed .arrow { transform: rotate(-90deg); }
+  .section-body { border: 1px solid #dfe6e9; border-top: none; border-radius: 0 0 8px 8px; overflow: hidden; }
+  .section-body.hidden { display: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  thead th { background: #f8f9fa; padding: 8px 10px; text-align: left; font-weight: 600; border-bottom: 2px solid #dfe6e9; position: sticky; top: 0; cursor: pointer; white-space: nowrap; }
+  thead th:hover { background: #eef0f2; }
+  thead th .sort-arrow { margin-left: 4px; font-size: 0.7rem; color: #b2bec3; }
+  thead th .sort-arrow.active { color: #2d3436; }
+  tbody td { padding: 6px 10px; border-bottom: 1px solid #f1f2f6; }
+  tbody tr:hover { background: #f8f9fa; }
+  .cls-definitive { border-left: 4px solid #00b894; }
+  .cls-strong { border-left: 4px solid #00cec9; }
+  .cls-moderate { border-left: 4px solid #0984e3; }
+  .cls-limited { border-left: 4px solid #6c5ce7; }
+  .cls-supportive { border-left: 4px solid #a29bfe; }
+  .cls-disputed { border-left: 4px solid #fdcb6e; }
+  .cls-refuted { border-left: 4px solid #e17055; }
+  .cls-noknown { border-left: 4px solid #b2bec3; }
+  .drop-zone { border: 2px dashed #b2bec3; border-radius: 8px; padding: 40px; text-align: center; color: #636e72; margin-bottom: 16px; background: #fff; }
+  .drop-zone.drag-over { border-color: #0984e3; background: #dfe6e9; }
+  .drop-zone input[type="file"] { display: none; }
+  .drop-zone a { color: #0984e3; cursor: pointer; text-decoration: underline; }
+  .loading { text-align: center; padding: 40px; color: #636e72; }
+  .gene-link { color: #0984e3; text-decoration: none; }
+  .gene-link:hover { text-decoration: underline; }
+  .submitters { max-width: 350px; }
+  .max-rows-note { padding: 8px 10px; background: #ffeaa7; font-size: 0.8rem; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>GenCC Submissions Viewer</h1>
+<p class="subtitle">Gene Curation Coalition &mdash; gene-disease validity classifications</p>
+
+<div id="drop-zone" class="drop-zone">
+  <p>Drag &amp; drop <strong>gencc-submissions.csv</strong> here, or <a id="browse-link">browse</a> to select it.</p>
+  <input type="file" id="file-input" accept=".csv">
+</div>
+
+<div id="app" style="display:none;">
+  <div class="controls">
+    <div>
+      <label for="grouping">Group by:</label>
+      <select id="grouping">
+        <option value="gene">Gene</option>
+        <option value="gene-disease">Gene + Disease</option>
+        <option value="gene-disease-moi">Gene + Disease + MOI</option>
+      </select>
+    </div>
+    <div>
+      <label for="filter">Filter gene:</label>
+      <input type="text" id="filter" placeholder="e.g. BRCA1">
+    </div>
+    <div id="stats"></div>
+  </div>
+  <div id="tables"></div>
+</div>
+
+<script>
+// Minimal CSV parser handling quoted fields with embedded commas, quotes, and newlines
+function parseCSV(text) {
+  var rows = [];
+  var i = 0;
+  var len = text.length;
+  while (i < len) {
+    var row = [];
+    while (i < len) {
+      if (text[i] === '"') {
+        i++;
+        var val = '';
+        while (i < len) {
+          if (text[i] === '"') {
+            if (i + 1 < len && text[i + 1] === '"') {
+              val += '"';
+              i += 2;
+            } else {
+              i++;
+              break;
+            }
+          } else {
+            val += text[i];
+            i++;
+          }
+        }
+        row.push(val);
+      } else {
+        var start = i;
+        while (i < len && text[i] !== ',' && text[i] !== '\n' && text[i] !== '\r') i++;
+        row.push(text.substring(start, i));
+      }
+      if (i < len && text[i] === ',') {
+        i++;
+      } else {
+        break;
+      }
+    }
+    if (i < len && text[i] === '\r') i++;
+    if (i < len && text[i] === '\n') i++;
+    if (row.length > 1 || (row.length === 1 && row[0] !== '')) {
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+var CLASSIFICATIONS = [
+  'Definitive', 'Strong', 'Moderate', 'Limited', 'Supportive',
+  'Disputed Evidence', 'Refuted Evidence', 'No Known Disease Relationship'
+];
+
+var CLS_CLASSES = {
+  'Definitive': 'cls-definitive',
+  'Strong': 'cls-strong',
+  'Moderate': 'cls-moderate',
+  'Limited': 'cls-limited',
+  'Supportive': 'cls-supportive',
+  'Disputed Evidence': 'cls-disputed',
+  'Refuted Evidence': 'cls-refuted',
+  'No Known Disease Relationship': 'cls-noknown'
+};
+
+var allRows = null;  // array of objects with relevant fields
+var colIdx = {};     // header name -> index
+
+function loadData(text) {
+  var parsed = parseCSV(text);
+  if (parsed.length < 2) return;
+  var headers = parsed[0];
+  for (var h = 0; h < headers.length; h++) colIdx[headers[h]] = h;
+
+  var needed = ['gene_symbol', 'gene_curie', 'disease_title', 'disease_curie',
+    'classification_title', 'moi_title', 'submitter_title', 'submitted_as_date'];
+  for (var n = 0; n < needed.length; n++) {
+    if (colIdx[needed[n]] === undefined) {
+      alert('Missing column: ' + needed[n]);
+      return;
+    }
+  }
+
+  allRows = [];
+  for (var r = 1; r < parsed.length; r++) {
+    var p = parsed[r];
+    var cls = p[colIdx['classification_title']] || '';
+    if (CLASSIFICATIONS.indexOf(cls) === -1) continue;
+    allRows.push({
+      gene: p[colIdx['gene_symbol']] || '',
+      geneCurie: p[colIdx['gene_curie']] || '',
+      disease: p[colIdx['disease_title']] || '',
+      diseaseCurie: p[colIdx['disease_curie']] || '',
+      classification: cls,
+      moi: p[colIdx['moi_title']] || '',
+      submitter: p[colIdx['submitter_title']] || '',
+      date: (p[colIdx['submitted_as_date']] || '').substring(0, 10)
+    });
+  }
+
+  var geneSet = {};
+  for (var i = 0; i < allRows.length; i++) geneSet[allRows[i].gene] = 1;
+  document.getElementById('stats').textContent =
+    allRows.length.toLocaleString() + ' submissions across ' +
+    Object.keys(geneSet).length.toLocaleString() + ' genes loaded';
+
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('app').style.display = '';
+  render();
+}
+
+function render() {
+  var grouping = document.getElementById('grouping').value;
+  var filterVal = document.getElementById('filter').value.trim().toUpperCase();
+  var container = document.getElementById('tables');
+  container.innerHTML = '';
+
+  // Group rows by classification, then by grouping key
+  // grouped[classification][key] = { gene, disease, moi, submitters: Set, count, latestDate }
+  var grouped = {};
+  for (var c = 0; c < CLASSIFICATIONS.length; c++) grouped[CLASSIFICATIONS[c]] = {};
+
+  for (var i = 0; i < allRows.length; i++) {
+    var row = allRows[i];
+    if (filterVal && row.gene.toUpperCase().indexOf(filterVal) === -1) continue;
+
+    var key;
+    if (grouping === 'gene') {
+      key = row.gene;
+    } else if (grouping === 'gene-disease') {
+      key = row.gene + '\t' + row.disease;
+    } else {
+      key = row.gene + '\t' + row.disease + '\t' + row.moi;
+    }
+
+    var bucket = grouped[row.classification];
+    if (!bucket[key]) {
+      bucket[key] = {
+        gene: row.gene,
+        geneCurie: row.geneCurie,
+        disease: row.disease,
+        diseaseCurie: row.diseaseCurie,
+        moi: row.moi,
+        submitters: {},
+        count: 0,
+        latestDate: ''
+      };
+    }
+    var entry = bucket[key];
+    entry.submitters[row.submitter] = 1;
+    entry.count++;
+    if (row.date > entry.latestDate) entry.latestDate = row.date;
+  }
+
+  for (var c = 0; c < CLASSIFICATIONS.length; c++) {
+    var cls = CLASSIFICATIONS[c];
+    var bucket = grouped[cls];
+    var keys = Object.keys(bucket);
+    if (keys.length === 0) continue;
+
+    // Sort by count descending
+    keys.sort(function(a, b) { return bucket[b].count - bucket[a].count; });
+
+    var section = document.createElement('div');
+    section.className = 'section';
+
+    var header = document.createElement('div');
+    header.className = 'section-header ' + (CLS_CLASSES[cls] || '');
+    header.innerHTML = '<h2>' + escHtml(cls) + '</h2>' +
+      '<div><span class="count">' + keys.length.toLocaleString() + ' groups, ' +
+      countTotal(bucket, keys).toLocaleString() + ' submissions</span> ' +
+      '<span class="arrow">&#9660;</span></div>';
+
+    var body = document.createElement('div');
+    body.className = 'section-body';
+
+    header.addEventListener('click', (function(b) {
+      return function() {
+        b.classList.toggle('hidden');
+        this.classList.toggle('collapsed');
+      };
+    })(body));
+
+    var showDisease = grouping !== 'gene';
+    var showMoi = grouping === 'gene-disease-moi';
+
+    var table = document.createElement('table');
+    var thead = '<thead><tr>';
+    thead += '<th data-col="gene">Gene <span class="sort-arrow">&#9650;&#9660;</span></th>';
+    if (showDisease) thead += '<th data-col="disease">Disease <span class="sort-arrow">&#9650;&#9660;</span></th>';
+    if (showMoi) thead += '<th data-col="moi">MOI <span class="sort-arrow">&#9650;&#9660;</span></th>';
+    thead += '<th data-col="submitters">Submitters</th>';
+    thead += '<th data-col="count">Count <span class="sort-arrow">&#9650;&#9660;</span></th>';
+    thead += '<th data-col="date">Latest Date <span class="sort-arrow">&#9650;&#9660;</span></th>';
+    thead += '</tr></thead>';
+    table.innerHTML = thead;
+
+    var tbody = document.createElement('tbody');
+    var MAX_ROWS = 500;
+    var limited = keys.length > MAX_ROWS;
+    var showKeys = limited ? keys.slice(0, MAX_ROWS) : keys;
+
+    for (var k = 0; k < showKeys.length; k++) {
+      var entry = bucket[showKeys[k]];
+      var tr = document.createElement('tr');
+      var subs = Object.keys(entry.submitters).sort().join(', ');
+      var hgncId = entry.geneCurie.replace('HGNC:', '');
+
+      var html = '<td><a class="gene-link" href="https://search.thegencc.org/genes/' + encodeURIComponent(hgncId) + '" target="_blank">' + escHtml(entry.gene) + '</a></td>';
+      if (showDisease) html += '<td>' + escHtml(entry.disease) + '</td>';
+      if (showMoi) html += '<td>' + escHtml(entry.moi) + '</td>';
+      html += '<td class="submitters">' + escHtml(subs) + '</td>';
+      html += '<td>' + entry.count + '</td>';
+      html += '<td>' + escHtml(entry.latestDate) + '</td>';
+      tr.innerHTML = html;
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    body.appendChild(table);
+
+    if (limited) {
+      var note = document.createElement('div');
+      note.className = 'max-rows-note';
+      note.textContent = 'Showing ' + MAX_ROWS + ' of ' + keys.length.toLocaleString() + ' rows. Use the filter to narrow results.';
+      body.appendChild(note);
+    }
+
+    section.appendChild(header);
+    section.appendChild(body);
+    container.appendChild(section);
+
+    // Column sorting
+    (function(tbl, bkt, ks, showD, showM) {
+      var ths = tbl.querySelectorAll('thead th');
+      for (var t = 0; t < ths.length; t++) {
+        ths[t].addEventListener('click', (function(th) {
+          return function() {
+            var col = th.getAttribute('data-col');
+            var asc = th._sortDir !== 'asc';
+            th._sortDir = asc ? 'asc' : 'desc';
+            ks.sort(function(a, b) {
+              var ea = bkt[a], eb = bkt[b];
+              var va, vb;
+              if (col === 'gene') { va = ea.gene.toLowerCase(); vb = eb.gene.toLowerCase(); }
+              else if (col === 'disease') { va = ea.disease.toLowerCase(); vb = eb.disease.toLowerCase(); }
+              else if (col === 'moi') { va = ea.moi.toLowerCase(); vb = eb.moi.toLowerCase(); }
+              else if (col === 'count') { va = ea.count; vb = eb.count; }
+              else if (col === 'date') { va = ea.latestDate; vb = eb.latestDate; }
+              else return 0;
+              if (va < vb) return asc ? -1 : 1;
+              if (va > vb) return asc ? 1 : -1;
+              return 0;
+            });
+            var tb = tbl.querySelector('tbody');
+            tb.innerHTML = '';
+            var show = ks.length > MAX_ROWS ? ks.slice(0, MAX_ROWS) : ks;
+            for (var k = 0; k < show.length; k++) {
+              var entry = bkt[show[k]];
+              var subs = Object.keys(entry.submitters).sort().join(', ');
+              var hid = entry.geneCurie.replace('HGNC:', '');
+              var tr = document.createElement('tr');
+              var html = '<td><a class="gene-link" href="https://search.thegencc.org/genes/' + encodeURIComponent(hid) + '" target="_blank">' + escHtml(entry.gene) + '</a></td>';
+              if (showD) html += '<td>' + escHtml(entry.disease) + '</td>';
+              if (showM) html += '<td>' + escHtml(entry.moi) + '</td>';
+              html += '<td class="submitters">' + escHtml(subs) + '</td>';
+              html += '<td>' + entry.count + '</td>';
+              html += '<td>' + escHtml(entry.latestDate) + '</td>';
+              tr.innerHTML = html;
+              tb.appendChild(tr);
+            }
+          };
+        })(ths[t]));
+      }
+    })(table, bucket, keys, showDisease, showMoi);
+  }
+}
+
+function countTotal(bucket, keys) {
+  var t = 0;
+  for (var i = 0; i < keys.length; i++) t += bucket[keys[i]].count;
+  return t;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// File input handling
+document.getElementById('browse-link').addEventListener('click', function() {
+  document.getElementById('file-input').click();
+});
+
+document.getElementById('file-input').addEventListener('change', function(e) {
+  if (e.target.files.length) readFile(e.target.files[0]);
+});
+
+var dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('drag-over'); });
+dropZone.addEventListener('drop', function(e) {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length) readFile(e.dataTransfer.files[0]);
+});
+
+function readFile(file) {
+  dropZone.innerHTML = '<p>Loading...</p>';
+  var reader = new FileReader();
+  reader.onload = function(e) { loadData(e.target.result); };
+  reader.readAsText(file);
+}
+
+// Re-render on control changes
+document.getElementById('grouping').addEventListener('change', function() { if (allRows) render(); });
+var filterTimeout;
+document.getElementById('filter').addEventListener('input', function() {
+  clearTimeout(filterTimeout);
+  filterTimeout = setTimeout(function() { if (allRows) render(); }, 300);
+});
+</script>
+</body>
+</html>
