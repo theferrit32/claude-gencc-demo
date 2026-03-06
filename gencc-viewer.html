@@ -48,10 +48,11 @@
   .gene-link:hover { text-decoration: underline; }
   .submitters { max-width: 350px; }
   .max-rows-note { padding: 8px 10px; background: #ffeaa7; font-size: 0.8rem; text-align: center; }
-  .conflict-summary { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-  .conflict-summary h3 { font-size: 0.95rem; margin-bottom: 10px; }
-  .conflict-summary table { width: auto; }
-  .conflict-summary td, .conflict-summary th { padding: 4px 12px; }
+  .conflict-summary, .cluster-overlap-summary { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .conflict-summary h3, .cluster-overlap-summary h3 { font-size: 0.95rem; margin-bottom: 10px; }
+  .conflict-summary table, .cluster-overlap-summary table { width: auto; }
+  .conflict-summary td, .conflict-summary th, .cluster-overlap-summary td, .cluster-overlap-summary th { padding: 4px 12px; }
+  .cluster-overlap-summary td.cluster-ids { font-size: 0.75rem; max-width: 600px; word-break: break-word; }
   .group-editor { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: none; }
   .group-editor.visible { display: block; }
   .group-editor h3 { font-size: 0.9rem; margin-bottom: 10px; }
@@ -570,6 +571,10 @@ function render() {
 
   var clusteringEnabled = hierarchyLoaded && parseInt(document.getElementById('cluster-hops').value) > 0;
 
+  if (clusteringEnabled) {
+    buildClusterOverlapSummary(container, filterVal);
+  }
+
   if (clsMode === 'conflicts') {
     renderConflicts(container, filterVal, clusteringEnabled);
     return;
@@ -748,6 +753,68 @@ function countTotal(bucket, keys) {
   var t = 0;
   for (var i = 0; i < keys.length; i++) t += bucket[keys[i]].count;
   return t;
+}
+
+// ===================== Cluster Overlap Summary =====================
+function buildClusterOverlapSummary(container, filterVal) {
+  // Bucket all rows by gene-disease(clustered)-moi, tracking submitter -> set of MONDO IDs
+  var buckets = {};  // key -> { gene, disease, moi, submitterIds: { submitter -> { mondoId: true } } }
+  for (var i = 0; i < allRows.length; i++) {
+    var row = allRows[i];
+    if (filterVal && row.gene.toUpperCase().indexOf(filterVal) === -1) continue;
+    if (!row.diseaseCurie || !row.diseaseCurie.startsWith('MONDO:')) continue;
+
+    var diseaseKey = row.disease;
+    if (clusterMap[row.gene]) {
+      var numericId = row.diseaseCurie.replace('MONDO:', '');
+      var clusterId = clusterMap[row.gene][numericId];
+      if (clusterId) {
+        var info = clusterInfo[row.gene + '\t' + clusterId];
+        if (info) diseaseKey = info.label;
+      }
+    }
+
+    var key = row.gene + '\t' + diseaseKey + '\t' + row.moi;
+    if (!buckets[key]) {
+      buckets[key] = { gene: row.gene, disease: diseaseKey, moi: row.moi, submitterIds: {} };
+    }
+    var b = buckets[key];
+    if (!b.submitterIds[row.submitter]) b.submitterIds[row.submitter] = {};
+    b.submitterIds[row.submitter][row.diseaseCurie.replace('MONDO:', '')] = true;
+  }
+
+  // For each bucket, find submitters with >1 distinct MONDO ID
+  var submitterStats = {};  // submitter -> { count: N, clusterIds: [] }
+  for (var key in buckets) {
+    var b = buckets[key];
+    var compoundId = b.gene + '-' + b.disease + '-' + b.moi;
+    for (var sub in b.submitterIds) {
+      var ids = Object.keys(b.submitterIds[sub]);
+      if (ids.length > 1) {
+        if (!submitterStats[sub]) submitterStats[sub] = { count: 0, clusterIds: [] };
+        submitterStats[sub].count += ids.length;
+        submitterStats[sub].clusterIds.push(compoundId);
+      }
+    }
+  }
+
+  var submitters = Object.keys(submitterStats);
+  if (submitters.length === 0) return;
+  submitters.sort(function(a, b) { return submitterStats[b].count - submitterStats[a].count; });
+
+  var div = document.createElement('div');
+  div.className = 'cluster-overlap-summary';
+  var html = '<h3>Same-submitter cluster overlaps</h3>';
+  html += '<table><thead><tr><th>Submitter</th><th>Overlapping submissions</th><th>Affected clusters (gene-disease-moi)</th></tr></thead><tbody>';
+  for (var si = 0; si < submitters.length; si++) {
+    var name = submitters[si];
+    var ss = submitterStats[name];
+    html += '<tr><td>' + escHtml(name) + '</td><td>' + ss.count + '</td>';
+    html += '<td class="cluster-ids">' + ss.clusterIds.map(escHtml).join(', ') + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  div.innerHTML = html;
+  container.appendChild(div);
 }
 
 // ===================== Conflict View =====================
