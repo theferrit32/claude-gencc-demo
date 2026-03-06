@@ -49,7 +49,11 @@
   .submitters { max-width: 350px; }
   .max-rows-note { padding: 8px 10px; background: #ffeaa7; font-size: 0.8rem; text-align: center; }
   .conflict-summary, .cluster-overlap-summary { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-  .conflict-summary h3, .cluster-overlap-summary h3 { font-size: 0.95rem; margin-bottom: 10px; }
+  .conflict-summary h3, .cluster-overlap-summary h3 { font-size: 0.95rem; margin-bottom: 0; cursor: pointer; user-select: none; }
+  .conflict-summary h3 .arrow, .cluster-overlap-summary h3 .arrow { font-size: 0.8rem; transition: transform 0.2s; display: inline-block; margin-right: 4px; }
+  .conflict-summary h3.collapsed .arrow, .cluster-overlap-summary h3.collapsed .arrow { transform: rotate(-90deg); }
+  .conflict-summary .summary-body, .cluster-overlap-summary .summary-body { margin-top: 10px; }
+  .conflict-summary .summary-body.hidden, .cluster-overlap-summary .summary-body.hidden { display: none; }
   .conflict-summary table, .cluster-overlap-summary table { width: auto; }
   .conflict-summary td, .conflict-summary th, .cluster-overlap-summary td, .cluster-overlap-summary th { padding: 4px 12px; }
   .cluster-overlap-summary td.cluster-ids { font-size: 0.75rem; max-width: 600px; word-break: break-word; }
@@ -804,8 +808,13 @@ function buildClusterOverlapSummary(container, filterVal) {
 
   var div = document.createElement('div');
   div.className = 'cluster-overlap-summary';
-  var html = '<h3>Same-submitter cluster overlaps</h3>';
-  html += '<table><thead><tr><th>Submitter</th><th>Overlapping submissions</th><th>Affected clusters (gene-disease-moi)</th></tr></thead><tbody>';
+  var heading = document.createElement('h3');
+  heading.className = 'collapsed';
+  heading.innerHTML = '<span class="arrow">&#9660;</span> Same-submitter cluster overlaps';
+  var body = document.createElement('div');
+  body.className = 'summary-body hidden';
+  heading.addEventListener('click', function() { heading.classList.toggle('collapsed'); body.classList.toggle('hidden'); });
+  var html = '<table><thead><tr><th>Submitter</th><th>Overlapping submissions</th><th>Affected clusters (gene-disease-moi)</th></tr></thead><tbody>';
   for (var si = 0; si < submitters.length; si++) {
     var name = submitters[si];
     var ss = submitterStats[name];
@@ -813,7 +822,9 @@ function buildClusterOverlapSummary(container, filterVal) {
     html += '<td class="cluster-ids">' + ss.clusterIds.map(escHtml).join(', ') + '</td></tr>';
   }
   html += '</tbody></table>';
-  div.innerHTML = html;
+  body.innerHTML = html;
+  div.appendChild(heading);
+  div.appendChild(body);
   container.appendChild(div);
 }
 
@@ -917,8 +928,13 @@ function renderConflicts(container, filterVal, clusteringEnabled) {
 
   var summaryDiv = document.createElement('div');
   summaryDiv.className = 'conflict-summary';
-  var shtml = '<h3>Conflict-causing submissions by submitter</h3>';
-  shtml += '<table><thead><tr><th>Submitter</th><th>Conflicts</th>';
+  var summaryHeading = document.createElement('h3');
+  summaryHeading.className = 'collapsed';
+  summaryHeading.innerHTML = '<span class="arrow">&#9660;</span> Conflict-causing submissions by submitter';
+  var summaryBody = document.createElement('div');
+  summaryBody.className = 'summary-body hidden';
+  summaryHeading.addEventListener('click', function() { summaryHeading.classList.toggle('collapsed'); summaryBody.classList.toggle('hidden'); });
+  var shtml = '<table><thead><tr><th>Submitter</th><th>Conflicts</th>';
   for (var ci = 0; ci < classNames.length; ci++) shtml += '<th>' + escHtml(classNames[ci]) + '</th>';
   shtml += '</tr></thead><tbody>';
   for (var si = 0; si < summarySubmitters.length; si++) {
@@ -932,7 +948,9 @@ function renderConflicts(container, filterVal, clusteringEnabled) {
     shtml += '</tr>';
   }
   shtml += '</tbody></table>';
-  summaryDiv.innerHTML = shtml;
+  summaryBody.innerHTML = shtml;
+  summaryDiv.appendChild(summaryHeading);
+  summaryDiv.appendChild(summaryBody);
   container.appendChild(summaryDiv);
 
   var section = document.createElement('div');
