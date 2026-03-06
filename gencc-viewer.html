@@ -47,6 +47,31 @@
   .gene-link:hover { text-decoration: underline; }
   .submitters { max-width: 350px; }
   .max-rows-note { padding: 8px 10px; background: #ffeaa7; font-size: 0.8rem; text-align: center; }
+  .group-editor { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: none; }
+  .group-editor.visible { display: block; }
+  .group-editor h3 { font-size: 0.9rem; margin-bottom: 10px; }
+  .group-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 6px; }
+  .group-row input[type="text"] { width: 160px; padding: 4px 8px; border: 1px solid #b2bec3; border-radius: 4px; font-size: 0.82rem; font-weight: 600; }
+  .group-tags { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-height: 28px; }
+  .group-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; font-size: 0.78rem; cursor: pointer; user-select: none; border: 1px solid transparent; }
+  .group-tag:hover { opacity: 0.85; }
+  .group-tag.in-group { color: #fff; }
+  .group-tag.available { background: #f1f2f6; color: #636e72; border: 1px dashed #b2bec3; }
+  .group-tag.available:hover { background: #dfe6e9; }
+  .unassigned-pool { margin-bottom: 10px; }
+  .unassigned-pool .label { font-size: 0.8rem; color: #636e72; margin-bottom: 4px; }
+  .group-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .group-actions button, .group-row button { padding: 4px 10px; border: 1px solid #b2bec3; border-radius: 4px; background: #fff; font-size: 0.8rem; cursor: pointer; }
+  .group-actions button:hover, .group-row button:hover { background: #f1f2f6; }
+  .group-row .remove-group { color: #e17055; border-color: #e17055; align-self: center; }
+  .tag-definitive { background: #00b894; }
+  .tag-strong { background: #00cec9; }
+  .tag-moderate { background: #0984e3; }
+  .tag-limited { background: #6c5ce7; }
+  .tag-supportive { background: #a29bfe; }
+  .tag-disputed { background: #fdcb6e; color: #2d3436 !important; }
+  .tag-refuted { background: #e17055; }
+  .tag-noknown { background: #b2bec3; }
 </style>
 </head>
 <body>
@@ -70,10 +95,29 @@
       </select>
     </div>
     <div>
+      <label for="cls-mode">Classifications:</label>
+      <select id="cls-mode">
+        <option value="individual">Individual</option>
+        <option value="custom">Custom groups</option>
+      </select>
+    </div>
+    <div>
       <label for="filter">Filter gene:</label>
       <input type="text" id="filter" placeholder="e.g. BRCA1">
     </div>
     <div id="stats"></div>
+  </div>
+  <div id="group-editor" class="group-editor">
+    <h3>Classification Groups</h3>
+    <div id="unassigned-pool" class="unassigned-pool">
+      <div class="label">Unassigned (click to add to a group):</div>
+      <div class="group-tags" id="unassigned-tags"></div>
+    </div>
+    <div id="group-rows"></div>
+    <div class="group-actions">
+      <button id="add-group-btn">+ Add group</button>
+      <button id="reset-groups-btn">Reset to defaults</button>
+    </div>
   </div>
   <div id="tables"></div>
 </div>
@@ -141,6 +185,29 @@ var CLS_CLASSES = {
   'No Known Disease Relationship': 'cls-noknown'
 };
 
+var TAG_CLASSES = {
+  'Definitive': 'tag-definitive',
+  'Strong': 'tag-strong',
+  'Moderate': 'tag-moderate',
+  'Limited': 'tag-limited',
+  'Supportive': 'tag-supportive',
+  'Disputed Evidence': 'tag-disputed',
+  'Refuted Evidence': 'tag-refuted',
+  'No Known Disease Relationship': 'tag-noknown'
+};
+
+// Custom classification groups
+// Each group: { name: string, members: string[] }
+var customGroups = [];
+var DEFAULT_GROUPS = [
+  { name: 'Strong Evidence', members: ['Definitive', 'Strong', 'Moderate'] },
+  { name: 'Limited Evidence', members: ['Limited', 'Supportive'] },
+  { name: 'Contradictory', members: ['Disputed Evidence', 'Refuted Evidence', 'No Known Disease Relationship'] }
+];
+
+// Currently selected group index for adding unassigned tags
+var selectedGroupIdx = 0;
+
 var allRows = null;  // array of objects with relevant fields
 var colIdx = {};     // header name -> index
 
@@ -189,168 +256,176 @@ function loadData(text) {
 
 function render() {
   var grouping = document.getElementById('grouping').value;
+  var clsMode = document.getElementById('cls-mode').value;
   var filterVal = document.getElementById('filter').value.trim().toUpperCase();
   var container = document.getElementById('tables');
   container.innerHTML = '';
 
-  // Group rows by classification, then by grouping key
-  // grouped[classification][key] = { gene, disease, moi, submitters: Set, count, latestDate }
-  var grouped = {};
-  for (var c = 0; c < CLASSIFICATIONS.length; c++) grouped[CLASSIFICATIONS[c]] = {};
-
-  for (var i = 0; i < allRows.length; i++) {
-    var row = allRows[i];
-    if (filterVal && row.gene.toUpperCase().indexOf(filterVal) === -1) continue;
-
-    var key;
-    if (grouping === 'gene') {
-      key = row.gene;
-    } else if (grouping === 'gene-disease') {
-      key = row.gene + '\t' + row.disease;
-    } else {
-      key = row.gene + '\t' + row.disease + '\t' + row.moi;
-    }
-
-    var bucket = grouped[row.classification];
-    if (!bucket[key]) {
-      bucket[key] = {
-        gene: row.gene,
-        geneCurie: row.geneCurie,
-        disease: row.disease,
-        diseaseCurie: row.diseaseCurie,
-        moi: row.moi,
-        submitters: {},
-        count: 0,
-        latestDate: ''
-      };
-    }
-    var entry = bucket[key];
-    entry.submitters[row.submitter] = 1;
-    entry.count++;
-    if (row.date > entry.latestDate) entry.latestDate = row.date;
+  // Build the list of sections to render.
+  // In individual mode: one section per classification.
+  // In custom mode: one section per custom group (merging multiple classifications).
+  var sections; // array of { name: string, members: string[], cssClass: string }
+  if (clsMode === 'individual') {
+    sections = CLASSIFICATIONS.map(function(cls) {
+      return { name: cls, members: [cls], cssClass: CLS_CLASSES[cls] || '' };
+    });
+  } else {
+    sections = customGroups.filter(function(g) { return g.members.length > 0; }).map(function(g) {
+      // Use the border color of the first member
+      return { name: g.name, members: g.members.slice(), cssClass: CLS_CLASSES[g.members[0]] || '' };
+    });
   }
 
-  for (var c = 0; c < CLASSIFICATIONS.length; c++) {
-    var cls = CLASSIFICATIONS[c];
-    var bucket = grouped[cls];
+  var showDisease = grouping !== 'gene';
+  var showMoi = grouping === 'gene-disease-moi';
+
+  for (var s = 0; s < sections.length; s++) {
+    var sec = sections[s];
+    var memberSet = {};
+    for (var m = 0; m < sec.members.length; m++) memberSet[sec.members[m]] = 1;
+
+    // Build grouped bucket for this section
+    var bucket = {};
+    for (var i = 0; i < allRows.length; i++) {
+      var row = allRows[i];
+      if (!memberSet[row.classification]) continue;
+      if (filterVal && row.gene.toUpperCase().indexOf(filterVal) === -1) continue;
+
+      var key;
+      if (grouping === 'gene') {
+        key = row.gene;
+      } else if (grouping === 'gene-disease') {
+        key = row.gene + '\t' + row.disease;
+      } else {
+        key = row.gene + '\t' + row.disease + '\t' + row.moi;
+      }
+
+      if (!bucket[key]) {
+        bucket[key] = {
+          gene: row.gene,
+          geneCurie: row.geneCurie,
+          disease: row.disease,
+          diseaseCurie: row.diseaseCurie,
+          moi: row.moi,
+          submitters: {},
+          count: 0,
+          latestDate: ''
+        };
+      }
+      var entry = bucket[key];
+      entry.submitters[row.submitter] = 1;
+      entry.count++;
+      if (row.date > entry.latestDate) entry.latestDate = row.date;
+    }
+
     var keys = Object.keys(bucket);
     if (keys.length === 0) continue;
-
-    // Sort by count descending
     keys.sort(function(a, b) { return bucket[b].count - bucket[a].count; });
 
-    var section = document.createElement('div');
-    section.className = 'section';
-
-    var header = document.createElement('div');
-    header.className = 'section-header ' + (CLS_CLASSES[cls] || '');
-    header.innerHTML = '<h2>' + escHtml(cls) + '</h2>' +
-      '<div><span class="count">' + keys.length.toLocaleString() + ' groups, ' +
-      countTotal(bucket, keys).toLocaleString() + ' submissions</span> ' +
-      '<span class="arrow">&#9660;</span></div>';
-
-    var body = document.createElement('div');
-    body.className = 'section-body';
-
-    header.addEventListener('click', (function(b) {
-      return function() {
-        b.classList.toggle('hidden');
-        this.classList.toggle('collapsed');
-      };
-    })(body));
-
-    var showDisease = grouping !== 'gene';
-    var showMoi = grouping === 'gene-disease-moi';
-
-    var table = document.createElement('table');
-    var thead = '<thead><tr>';
-    thead += '<th data-col="gene">Gene <span class="sort-arrow">&#9650;&#9660;</span></th>';
-    if (showDisease) thead += '<th data-col="disease">Disease <span class="sort-arrow">&#9650;&#9660;</span></th>';
-    if (showMoi) thead += '<th data-col="moi">MOI <span class="sort-arrow">&#9650;&#9660;</span></th>';
-    thead += '<th data-col="submitters">Submitters</th>';
-    thead += '<th data-col="count">Count <span class="sort-arrow">&#9650;&#9660;</span></th>';
-    thead += '<th data-col="date">Latest Date <span class="sort-arrow">&#9650;&#9660;</span></th>';
-    thead += '</tr></thead>';
-    table.innerHTML = thead;
-
-    var tbody = document.createElement('tbody');
-    var MAX_ROWS = 500;
-    var limited = keys.length > MAX_ROWS;
-    var showKeys = limited ? keys.slice(0, MAX_ROWS) : keys;
-
-    for (var k = 0; k < showKeys.length; k++) {
-      var entry = bucket[showKeys[k]];
-      var tr = document.createElement('tr');
-      var subs = Object.keys(entry.submitters).sort().join(', ');
-      var hgncId = entry.geneCurie.replace('HGNC:', '');
-
-      var html = '<td><a class="gene-link" href="https://search.thegencc.org/genes/' + encodeURIComponent(hgncId) + '" target="_blank">' + escHtml(entry.gene) + '</a></td>';
-      if (showDisease) html += '<td>' + escHtml(entry.disease) + '</td>';
-      if (showMoi) html += '<td>' + escHtml(entry.moi) + '</td>';
-      html += '<td class="submitters">' + escHtml(subs) + '</td>';
-      html += '<td>' + entry.count + '</td>';
-      html += '<td>' + escHtml(entry.latestDate) + '</td>';
-      tr.innerHTML = html;
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    body.appendChild(table);
-
-    if (limited) {
-      var note = document.createElement('div');
-      note.className = 'max-rows-note';
-      note.textContent = 'Showing ' + MAX_ROWS + ' of ' + keys.length.toLocaleString() + ' rows. Use the filter to narrow results.';
-      body.appendChild(note);
-    }
-
-    section.appendChild(header);
-    section.appendChild(body);
-    container.appendChild(section);
-
-    // Column sorting
-    (function(tbl, bkt, ks, showD, showM) {
-      var ths = tbl.querySelectorAll('thead th');
-      for (var t = 0; t < ths.length; t++) {
-        ths[t].addEventListener('click', (function(th) {
-          return function() {
-            var col = th.getAttribute('data-col');
-            var asc = th._sortDir !== 'asc';
-            th._sortDir = asc ? 'asc' : 'desc';
-            ks.sort(function(a, b) {
-              var ea = bkt[a], eb = bkt[b];
-              var va, vb;
-              if (col === 'gene') { va = ea.gene.toLowerCase(); vb = eb.gene.toLowerCase(); }
-              else if (col === 'disease') { va = ea.disease.toLowerCase(); vb = eb.disease.toLowerCase(); }
-              else if (col === 'moi') { va = ea.moi.toLowerCase(); vb = eb.moi.toLowerCase(); }
-              else if (col === 'count') { va = ea.count; vb = eb.count; }
-              else if (col === 'date') { va = ea.latestDate; vb = eb.latestDate; }
-              else return 0;
-              if (va < vb) return asc ? -1 : 1;
-              if (va > vb) return asc ? 1 : -1;
-              return 0;
-            });
-            var tb = tbl.querySelector('tbody');
-            tb.innerHTML = '';
-            var show = ks.length > MAX_ROWS ? ks.slice(0, MAX_ROWS) : ks;
-            for (var k = 0; k < show.length; k++) {
-              var entry = bkt[show[k]];
-              var subs = Object.keys(entry.submitters).sort().join(', ');
-              var hid = entry.geneCurie.replace('HGNC:', '');
-              var tr = document.createElement('tr');
-              var html = '<td><a class="gene-link" href="https://search.thegencc.org/genes/' + encodeURIComponent(hid) + '" target="_blank">' + escHtml(entry.gene) + '</a></td>';
-              if (showD) html += '<td>' + escHtml(entry.disease) + '</td>';
-              if (showM) html += '<td>' + escHtml(entry.moi) + '</td>';
-              html += '<td class="submitters">' + escHtml(subs) + '</td>';
-              html += '<td>' + entry.count + '</td>';
-              html += '<td>' + escHtml(entry.latestDate) + '</td>';
-              tr.innerHTML = html;
-              tb.appendChild(tr);
-            }
-          };
-        })(ths[t]));
-      }
-    })(table, bucket, keys, showDisease, showMoi);
+    renderSection(container, sec.name, sec.cssClass, bucket, keys, showDisease, showMoi);
   }
+}
+
+function renderSection(container, title, cssClass, bucket, keys, showDisease, showMoi) {
+  var MAX_ROWS = 500;
+  var section = document.createElement('div');
+  section.className = 'section';
+
+  var header = document.createElement('div');
+  header.className = 'section-header ' + cssClass;
+  header.innerHTML = '<h2>' + escHtml(title) + '</h2>' +
+    '<div><span class="count">' + keys.length.toLocaleString() + ' groups, ' +
+    countTotal(bucket, keys).toLocaleString() + ' submissions</span> ' +
+    '<span class="arrow">&#9660;</span></div>';
+
+  var body = document.createElement('div');
+  body.className = 'section-body';
+
+  header.addEventListener('click', (function(b) {
+    return function() {
+      b.classList.toggle('hidden');
+      this.classList.toggle('collapsed');
+    };
+  })(body));
+
+  var table = document.createElement('table');
+  var thead = '<thead><tr>';
+  thead += '<th data-col="gene">Gene <span class="sort-arrow">&#9650;&#9660;</span></th>';
+  if (showDisease) thead += '<th data-col="disease">Disease <span class="sort-arrow">&#9650;&#9660;</span></th>';
+  if (showMoi) thead += '<th data-col="moi">MOI <span class="sort-arrow">&#9650;&#9660;</span></th>';
+  thead += '<th data-col="submitters">Submitters</th>';
+  thead += '<th data-col="count">Count <span class="sort-arrow">&#9650;&#9660;</span></th>';
+  thead += '<th data-col="date">Latest Date <span class="sort-arrow">&#9650;&#9660;</span></th>';
+  thead += '</tr></thead>';
+  table.innerHTML = thead;
+
+  var tbody = document.createElement('tbody');
+  var limited = keys.length > MAX_ROWS;
+  var showKeys = limited ? keys.slice(0, MAX_ROWS) : keys;
+
+  for (var k = 0; k < showKeys.length; k++) {
+    tbody.appendChild(buildRow(bucket[showKeys[k]], showDisease, showMoi));
+  }
+  table.appendChild(tbody);
+  body.appendChild(table);
+
+  if (limited) {
+    var note = document.createElement('div');
+    note.className = 'max-rows-note';
+    note.textContent = 'Showing ' + MAX_ROWS + ' of ' + keys.length.toLocaleString() + ' rows. Use the filter to narrow results.';
+    body.appendChild(note);
+  }
+
+  section.appendChild(header);
+  section.appendChild(body);
+  container.appendChild(section);
+
+  // Column sorting
+  (function(tbl, bkt, ks, showD, showM) {
+    var ths = tbl.querySelectorAll('thead th');
+    for (var t = 0; t < ths.length; t++) {
+      ths[t].addEventListener('click', (function(th) {
+        return function() {
+          var col = th.getAttribute('data-col');
+          var asc = th._sortDir !== 'asc';
+          th._sortDir = asc ? 'asc' : 'desc';
+          ks.sort(function(a, b) {
+            var ea = bkt[a], eb = bkt[b];
+            var va, vb;
+            if (col === 'gene') { va = ea.gene.toLowerCase(); vb = eb.gene.toLowerCase(); }
+            else if (col === 'disease') { va = ea.disease.toLowerCase(); vb = eb.disease.toLowerCase(); }
+            else if (col === 'moi') { va = ea.moi.toLowerCase(); vb = eb.moi.toLowerCase(); }
+            else if (col === 'count') { va = ea.count; vb = eb.count; }
+            else if (col === 'date') { va = ea.latestDate; vb = eb.latestDate; }
+            else return 0;
+            if (va < vb) return asc ? -1 : 1;
+            if (va > vb) return asc ? 1 : -1;
+            return 0;
+          });
+          var tb = tbl.querySelector('tbody');
+          tb.innerHTML = '';
+          var show = ks.length > MAX_ROWS ? ks.slice(0, MAX_ROWS) : ks;
+          for (var k = 0; k < show.length; k++) {
+            tb.appendChild(buildRow(bkt[show[k]], showD, showM));
+          }
+        };
+      })(ths[t]));
+    }
+  })(table, bucket, keys, showDisease, showMoi);
+}
+
+function buildRow(entry, showDisease, showMoi) {
+  var tr = document.createElement('tr');
+  var subs = Object.keys(entry.submitters).sort().join(', ');
+  var hgncId = entry.geneCurie.replace('HGNC:', '');
+  var html = '<td><a class="gene-link" href="https://search.thegencc.org/genes/' + encodeURIComponent(hgncId) + '" target="_blank">' + escHtml(entry.gene) + '</a></td>';
+  if (showDisease) html += '<td>' + escHtml(entry.disease) + '</td>';
+  if (showMoi) html += '<td>' + escHtml(entry.moi) + '</td>';
+  html += '<td class="submitters">' + escHtml(subs) + '</td>';
+  html += '<td>' + entry.count + '</td>';
+  html += '<td>' + escHtml(entry.latestDate) + '</td>';
+  tr.innerHTML = html;
+  return tr;
 }
 
 function countTotal(bucket, keys) {
@@ -387,6 +462,144 @@ function readFile(file) {
   reader.onload = function(e) { loadData(e.target.result); };
   reader.readAsText(file);
 }
+
+// --- Classification group editor ---
+
+function initGroups() {
+  customGroups = DEFAULT_GROUPS.map(function(g) {
+    return { name: g.name, members: g.members.slice() };
+  });
+}
+initGroups();
+
+function getAssignedSet() {
+  var assigned = {};
+  for (var g = 0; g < customGroups.length; g++) {
+    for (var m = 0; m < customGroups[g].members.length; m++) {
+      assigned[customGroups[g].members[m]] = 1;
+    }
+  }
+  return assigned;
+}
+
+function renderGroupEditor() {
+  var assigned = getAssignedSet();
+  var unassigned = CLASSIFICATIONS.filter(function(c) { return !assigned[c]; });
+
+  // Render unassigned pool
+  var poolEl = document.getElementById('unassigned-tags');
+  poolEl.innerHTML = '';
+  var poolLabel = document.querySelector('#unassigned-pool .label');
+  if (unassigned.length === 0) {
+    poolLabel.textContent = 'All classifications assigned.';
+  } else {
+    poolLabel.textContent = 'Unassigned \u2014 click a tag, then click a group to add it:';
+  }
+  for (var u = 0; u < unassigned.length; u++) {
+    var tag = document.createElement('span');
+    tag.className = 'group-tag available';
+    tag.textContent = unassigned[u];
+    tag.dataset.cls = unassigned[u];
+    tag.addEventListener('click', (function(cls) {
+      return function() {
+        // Add to first group that exists, or prompt
+        if (customGroups.length > 0) {
+          customGroups[0].members.push(cls);
+          renderGroupEditor();
+          if (allRows) render();
+        }
+      };
+    })(unassigned[u]));
+    poolEl.appendChild(tag);
+  }
+
+  // Render group rows
+  var rowsEl = document.getElementById('group-rows');
+  rowsEl.innerHTML = '';
+  for (var g = 0; g < customGroups.length; g++) {
+    (function(gi) {
+      var group = customGroups[gi];
+      var row = document.createElement('div');
+      row.className = 'group-row';
+
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.value = group.name;
+      nameInput.addEventListener('input', function() {
+        group.name = this.value;
+        if (allRows) render();
+      });
+
+      var tagsDiv = document.createElement('div');
+      tagsDiv.className = 'group-tags';
+      for (var m = 0; m < group.members.length; m++) {
+        (function(cls) {
+          var tag = document.createElement('span');
+          tag.className = 'group-tag in-group ' + (TAG_CLASSES[cls] || '');
+          tag.textContent = cls + ' \u00d7';
+          tag.title = 'Click to remove from group';
+          tag.addEventListener('click', function() {
+            group.members = group.members.filter(function(x) { return x !== cls; });
+            renderGroupEditor();
+            if (allRows) render();
+          });
+          tagsDiv.appendChild(tag);
+        })(group.members[m]);
+      }
+
+      // Drop target for unassigned tags
+      var addBtn = document.createElement('span');
+      addBtn.className = 'group-tag available';
+      addBtn.textContent = '+ add';
+      addBtn.title = 'Click to add next unassigned classification';
+      addBtn.addEventListener('click', function() {
+        var unass = CLASSIFICATIONS.filter(function(c) { return !getAssignedSet()[c]; });
+        if (unass.length > 0) {
+          group.members.push(unass[0]);
+          renderGroupEditor();
+          if (allRows) render();
+        }
+      });
+      tagsDiv.appendChild(addBtn);
+
+      var removeBtn = document.createElement('button');
+      removeBtn.className = 'remove-group';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', function() {
+        customGroups.splice(gi, 1);
+        renderGroupEditor();
+        if (allRows) render();
+      });
+
+      row.appendChild(nameInput);
+      row.appendChild(tagsDiv);
+      row.appendChild(removeBtn);
+      rowsEl.appendChild(row);
+    })(g);
+  }
+}
+
+document.getElementById('cls-mode').addEventListener('change', function() {
+  var editor = document.getElementById('group-editor');
+  if (this.value === 'custom') {
+    editor.classList.add('visible');
+    renderGroupEditor();
+  } else {
+    editor.classList.remove('visible');
+  }
+  if (allRows) render();
+});
+
+document.getElementById('add-group-btn').addEventListener('click', function() {
+  customGroups.push({ name: 'Group ' + (customGroups.length + 1), members: [] });
+  renderGroupEditor();
+});
+
+document.getElementById('reset-groups-btn').addEventListener('click', function() {
+  initGroups();
+  renderGroupEditor();
+  if (allRows) render();
+});
 
 // Re-render on control changes
 document.getElementById('grouping').addEventListener('change', function() { if (allRows) render(); });
