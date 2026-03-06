@@ -27,7 +27,6 @@
   thead th { background: #f8f9fa; padding: 8px 10px; text-align: left; font-weight: 600; border-bottom: 2px solid #dfe6e9; position: sticky; top: 0; cursor: pointer; white-space: nowrap; }
   thead th:hover { background: #eef0f2; }
   thead th .sort-arrow { margin-left: 4px; font-size: 0.7rem; color: #b2bec3; }
-  thead th .sort-arrow.active { color: #2d3436; }
   tbody td { padding: 6px 10px; border-bottom: 1px solid #f1f2f6; }
   tbody tr:hover { background: #f8f9fa; }
   .cls-definitive { border-left: 4px solid #00b894; }
@@ -42,6 +41,7 @@
   .drop-zone.drag-over { border-color: #0984e3; background: #dfe6e9; }
   .drop-zone input[type="file"] { display: none; }
   .drop-zone a { color: #0984e3; cursor: pointer; text-decoration: underline; }
+  .drop-zone.small { padding: 16px; }
   .loading { text-align: center; padding: 40px; color: #636e72; }
   .gene-link { color: #0984e3; text-decoration: none; }
   .gene-link:hover { text-decoration: underline; }
@@ -72,6 +72,39 @@
   .tag-disputed { background: #fdcb6e; color: #2d3436 !important; }
   .tag-refuted { background: #e17055; }
   .tag-noknown { background: #b2bec3; }
+  /* Tab system */
+  .tab-bar { display: flex; gap: 0; margin-bottom: 0; }
+  .tab-btn { padding: 10px 20px; border: 1px solid #dfe6e9; border-bottom: none; border-radius: 8px 8px 0 0; background: #f1f2f6; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: #636e72; }
+  .tab-btn:hover { background: #e8eaed; }
+  .tab-btn.active { background: #fff; color: #2d3436; border-bottom: 1px solid #fff; margin-bottom: -1px; z-index: 1; }
+  .tab-content { border: 1px solid #dfe6e9; border-radius: 0 8px 8px 8px; background: #fff; padding: 0; min-height: 200px; }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+  #tab-submissions { background: transparent; border: none; padding: 0; }
+  /* Cluster review */
+  .cluster-review { padding: 16px; }
+  .cluster-review .cr-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #dfe6e9; }
+  .cluster-review .cr-controls input[type="text"] { padding: 5px 8px; border: 1px solid #b2bec3; border-radius: 4px; font-size: 0.82rem; width: 160px; }
+  .cluster-review .cr-controls label { font-size: 0.82rem; display: flex; align-items: center; gap: 4px; }
+  .cr-stats { font-size: 0.82rem; color: #636e72; }
+  .blacklist-section { margin-bottom: 16px; }
+  .blacklist-section h4 { font-size: 0.85rem; margin-bottom: 6px; }
+  .blacklist-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; font-size: 0.78rem; background: #e17055; color: #fff; cursor: pointer; margin: 2px; }
+  .blacklist-tag:hover { opacity: 0.85; }
+  .cluster-card { border: 1px solid #dfe6e9; border-radius: 6px; margin-bottom: 8px; padding: 10px 14px; }
+  .cluster-card:hover { background: #f8f9fa; }
+  .cc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .cc-gene { font-weight: 700; color: #0984e3; margin-right: 8px; }
+  .cc-label { font-weight: 600; }
+  .cc-size { background: #dfe6e9; border-radius: 10px; padding: 1px 8px; font-size: 0.75rem; font-weight: 600; }
+  .cc-members { font-size: 0.8rem; color: #636e72; margin-bottom: 4px; }
+  .cc-member-id { color: #b2bec3; font-size: 0.75rem; }
+  .cc-lca { font-size: 0.8rem; margin-top: 4px; }
+  .cc-lca-label { font-weight: 600; }
+  .btn-blacklist { padding: 2px 6px; border: 1px solid #e17055; border-radius: 3px; background: #fff; color: #e17055; font-size: 0.72rem; cursor: pointer; margin-left: 6px; }
+  .btn-blacklist:hover { background: #e17055; color: #fff; }
+  .disease-cluster { border-bottom: 1px dashed #dfe6e9; cursor: help; }
+  .hidden-ctrl { display: none; }
 </style>
 </head>
 <body>
@@ -101,12 +134,22 @@
         <option value="custom">Custom groups</option>
       </select>
     </div>
+    <div id="cluster-ctrl" class="hidden-ctrl">
+      <label for="cluster-hops">Disease clustering:</label>
+      <select id="cluster-hops">
+        <option value="0">Off</option>
+        <option value="1" selected>1 hop</option>
+        <option value="2">2 hops</option>
+        <option value="3">3 hops</option>
+      </select>
+    </div>
     <div>
       <label for="filter">Filter gene:</label>
       <input type="text" id="filter" placeholder="e.g. BRCA1">
     </div>
     <div id="stats"></div>
   </div>
+
   <div id="group-editor" class="group-editor">
     <h3>Classification Groups</h3>
     <div id="unassigned-pool" class="unassigned-pool">
@@ -119,15 +162,30 @@
       <button id="reset-groups-btn">Reset to defaults</button>
     </div>
   </div>
+
+  <div id="mondo-drop-zone" class="drop-zone small">
+    <p><strong>Optional:</strong> Load MONDO hierarchy for disease clustering. Drop <strong>mondo-hierarchy.json</strong> or raw <strong>mondo.json</strong> here, or <a id="mondo-browse-link">browse</a>.</p>
+    <input type="file" id="mondo-file-input" accept=".json">
+  </div>
+
+  <div id="tab-bar-wrap" style="display:none;">
+    <div class="tab-bar">
+      <div class="tab-btn active" data-tab="submissions">Submissions</div>
+      <div class="tab-btn" data-tab="cluster-review" id="tab-btn-cluster" style="display:none;">Cluster Review</div>
+    </div>
+    <div class="tab-content">
+      <div id="tab-submissions" class="tab-pane active"></div>
+      <div id="tab-cluster-review" class="tab-pane cluster-review"></div>
+    </div>
+  </div>
   <div id="tables"></div>
 </div>
 
 <script>
-// Minimal CSV parser handling quoted fields with embedded commas, quotes, and newlines
+// ===================== CSV Parser =====================
 function parseCSV(text) {
   var rows = [];
-  var i = 0;
-  var len = text.length;
+  var i = 0, len = text.length;
   while (i < len) {
     var row = [];
     while (i < len) {
@@ -136,17 +194,9 @@ function parseCSV(text) {
         var val = '';
         while (i < len) {
           if (text[i] === '"') {
-            if (i + 1 < len && text[i + 1] === '"') {
-              val += '"';
-              i += 2;
-            } else {
-              i++;
-              break;
-            }
-          } else {
-            val += text[i];
-            i++;
-          }
+            if (i + 1 < len && text[i + 1] === '"') { val += '"'; i += 2; }
+            else { i++; break; }
+          } else { val += text[i]; i++; }
         }
         row.push(val);
       } else {
@@ -154,63 +204,72 @@ function parseCSV(text) {
         while (i < len && text[i] !== ',' && text[i] !== '\n' && text[i] !== '\r') i++;
         row.push(text.substring(start, i));
       }
-      if (i < len && text[i] === ',') {
-        i++;
-      } else {
-        break;
-      }
+      if (i < len && text[i] === ',') i++;
+      else break;
     }
     if (i < len && text[i] === '\r') i++;
     if (i < len && text[i] === '\n') i++;
-    if (row.length > 1 || (row.length === 1 && row[0] !== '')) {
-      rows.push(row);
-    }
+    if (row.length > 1 || (row.length === 1 && row[0] !== '')) rows.push(row);
   }
   return rows;
 }
 
+// ===================== Constants =====================
 var CLASSIFICATIONS = [
   'Definitive', 'Strong', 'Moderate', 'Limited', 'Supportive',
   'Disputed Evidence', 'Refuted Evidence', 'No Known Disease Relationship'
 ];
-
 var CLS_CLASSES = {
-  'Definitive': 'cls-definitive',
-  'Strong': 'cls-strong',
-  'Moderate': 'cls-moderate',
-  'Limited': 'cls-limited',
-  'Supportive': 'cls-supportive',
-  'Disputed Evidence': 'cls-disputed',
-  'Refuted Evidence': 'cls-refuted',
+  'Definitive': 'cls-definitive', 'Strong': 'cls-strong', 'Moderate': 'cls-moderate',
+  'Limited': 'cls-limited', 'Supportive': 'cls-supportive',
+  'Disputed Evidence': 'cls-disputed', 'Refuted Evidence': 'cls-refuted',
   'No Known Disease Relationship': 'cls-noknown'
 };
-
 var TAG_CLASSES = {
-  'Definitive': 'tag-definitive',
-  'Strong': 'tag-strong',
-  'Moderate': 'tag-moderate',
-  'Limited': 'tag-limited',
-  'Supportive': 'tag-supportive',
-  'Disputed Evidence': 'tag-disputed',
-  'Refuted Evidence': 'tag-refuted',
+  'Definitive': 'tag-definitive', 'Strong': 'tag-strong', 'Moderate': 'tag-moderate',
+  'Limited': 'tag-limited', 'Supportive': 'tag-supportive',
+  'Disputed Evidence': 'tag-disputed', 'Refuted Evidence': 'tag-refuted',
   'No Known Disease Relationship': 'tag-noknown'
 };
 
-// Custom classification groups
-// Each group: { name: string, members: string[] }
+// ===================== State =====================
 var customGroups = [];
 var DEFAULT_GROUPS = [
   { name: 'Strong Evidence', members: ['Definitive', 'Strong', 'Moderate'] },
   { name: 'Limited Evidence', members: ['Limited', 'Supportive'] },
   { name: 'Contradictory', members: ['Disputed Evidence', 'Refuted Evidence', 'No Known Disease Relationship'] }
 ];
+var allRows = null;
+var colIdx = {};
 
-// Currently selected group index for adding unassigned tags
-var selectedGroupIdx = 0;
+// MONDO hierarchy state
+var mondoNodes = null;    // { numericId: {l: label, s: [synonyms]} }
+var mondoParents = {};    // childId -> [parentId, ...]
+var mondoChildren = {};   // parentId -> [childId, ...]
+var hierarchyLoaded = false;
 
-var allRows = null;  // array of objects with relevant fields
-var colIdx = {};     // header name -> index
+// Clustering state
+var clusterMap = {};      // gene -> { mondoNumericId -> clusterKey }
+var clusterInfo = {};     // "gene\tclusterKey" -> { label, members: [{id, title}], lcaIds: [] }
+var lcaBlacklist = {};    // mondoNumericId -> true
 
+// ===================== Init =====================
+function initGroups() {
+  customGroups = DEFAULT_GROUPS.map(function(g) { return { name: g.name, members: g.members.slice() }; });
+}
+initGroups();
+
+// Load blacklist from localStorage
+try {
+  var saved = JSON.parse(localStorage.getItem('gencc-cluster-blacklist') || '[]');
+  for (var i = 0; i < saved.length; i++) lcaBlacklist[saved[i]] = true;
+} catch(e) {}
+
+function saveBlacklist() {
+  localStorage.setItem('gencc-cluster-blacklist', JSON.stringify(Object.keys(lcaBlacklist)));
+}
+
+// ===================== Data Loading =====================
 function loadData(text) {
   var parsed = parseCSV(text);
   if (parsed.length < 2) return;
@@ -220,10 +279,7 @@ function loadData(text) {
   var needed = ['gene_symbol', 'gene_curie', 'disease_title', 'disease_curie',
     'classification_title', 'moi_title', 'submitter_title', 'submitted_as_date'];
   for (var n = 0; n < needed.length; n++) {
-    if (colIdx[needed[n]] === undefined) {
-      alert('Missing column: ' + needed[n]);
-      return;
-    }
+    if (colIdx[needed[n]] === undefined) { alert('Missing column: ' + needed[n]); return; }
   }
 
   allRows = [];
@@ -246,32 +302,270 @@ function loadData(text) {
   var geneSet = {};
   for (var i = 0; i < allRows.length; i++) geneSet[allRows[i].gene] = 1;
   document.getElementById('stats').textContent =
-    allRows.length.toLocaleString() + ' submissions across ' +
-    Object.keys(geneSet).length.toLocaleString() + ' genes loaded';
+    allRows.length.toLocaleString() + ' submissions, ' +
+    Object.keys(geneSet).length.toLocaleString() + ' genes';
 
   document.getElementById('drop-zone').style.display = 'none';
   document.getElementById('app').style.display = '';
+  // Move tables into submissions tab
+  document.getElementById('tab-bar-wrap').style.display = '';
+  document.getElementById('tables').remove();
+  if (!document.getElementById('tables')) {
+    var t = document.createElement('div');
+    t.id = 'tables';
+    document.getElementById('tab-submissions').appendChild(t);
+  }
+  if (hierarchyLoaded) recomputeClusters();
   render();
 }
 
+// ===================== MONDO Hierarchy Loading =====================
+function loadHierarchy(jsonText) {
+  var data;
+  try { data = JSON.parse(jsonText); } catch(e) { alert('Invalid JSON'); return; }
+
+  if (data.graphs) {
+    // Raw mondo.json — trim inline
+    var graph = data.graphs[0];
+    var MONDO_P = 'http://purl.obolibrary.org/obo/MONDO_';
+    mondoNodes = {};
+    var nodesRaw = graph.nodes || [];
+    for (var i = 0; i < nodesRaw.length; i++) {
+      var n = nodesRaw[i];
+      var id = n.id || '';
+      if (id.indexOf(MONDO_P) !== 0) continue;
+      var nid = id.substring(MONDO_P.length);
+      var meta = n.meta || {};
+      if (meta.deprecated) continue;
+      var entry = { l: n.lbl || '' };
+      var syns = [];
+      var metaSyns = meta.synonyms || [];
+      for (var s = 0; s < metaSyns.length; s++) {
+        if (metaSyns[s].pred === 'hasExactSynonym' && metaSyns[s].val && metaSyns[s].val !== entry.l)
+          syns.push(metaSyns[s].val);
+      }
+      if (syns.length) entry.s = syns;
+      mondoNodes[nid] = entry;
+    }
+    mondoParents = {};
+    mondoChildren = {};
+    var edgesRaw = graph.edges || [];
+    for (var i = 0; i < edgesRaw.length; i++) {
+      var e = edgesRaw[i];
+      if (e.pred !== 'is_a') continue;
+      var cid = (e.sub || '').indexOf(MONDO_P) === 0 ? e.sub.substring(MONDO_P.length) : null;
+      var pid = (e.obj || '').indexOf(MONDO_P) === 0 ? e.obj.substring(MONDO_P.length) : null;
+      if (cid && pid && mondoNodes[cid] && mondoNodes[pid]) {
+        if (!mondoParents[cid]) mondoParents[cid] = [];
+        mondoParents[cid].push(pid);
+        if (!mondoChildren[pid]) mondoChildren[pid] = [];
+        mondoChildren[pid].push(cid);
+      }
+    }
+  } else if (data.n) {
+    // Pre-trimmed format
+    mondoNodes = data.n;
+    mondoParents = {};
+    mondoChildren = {};
+    var edges = data.e || [];
+    for (var i = 0; i < edges.length; i++) {
+      var cid = edges[i][0], pid = edges[i][1];
+      if (!mondoParents[cid]) mondoParents[cid] = [];
+      mondoParents[cid].push(pid);
+      if (!mondoChildren[pid]) mondoChildren[pid] = [];
+      mondoChildren[pid].push(cid);
+    }
+  } else {
+    alert('Unrecognized MONDO file format');
+    return;
+  }
+
+  hierarchyLoaded = true;
+  var nodeCount = Object.keys(mondoNodes).length;
+  document.getElementById('mondo-drop-zone').innerHTML =
+    '<p>MONDO hierarchy loaded: ' + nodeCount.toLocaleString() + ' disease nodes.</p>';
+  document.getElementById('cluster-ctrl').classList.remove('hidden-ctrl');
+  document.getElementById('tab-btn-cluster').style.display = '';
+
+  if (allRows) {
+    recomputeClusters();
+    render();
+    renderClusterReview();
+  }
+}
+
+// ===================== Clustering Algorithm =====================
+function getAncestors(nodeId, maxHops) {
+  // BFS upward, returns { ancestorId: distance }
+  var result = {};
+  result[nodeId] = 0;
+  var queue = [nodeId];
+  var dist = 0;
+  while (queue.length > 0 && dist < maxHops) {
+    dist++;
+    var next = [];
+    for (var q = 0; q < queue.length; q++) {
+      var parents = mondoParents[queue[q]];
+      if (!parents) continue;
+      for (var p = 0; p < parents.length; p++) {
+        if (result[parents[p]] === undefined) {
+          result[parents[p]] = dist;
+          next.push(parents[p]);
+        }
+      }
+    }
+    queue = next;
+  }
+  return result;
+}
+
+function findLCA(nodeA, nodeB, maxHops, blacklist) {
+  if (nodeA === nodeB) return { lcaId: nodeA, dist: 0 };
+  var ancA = getAncestors(nodeA, maxHops);
+  var ancB = getAncestors(nodeB, maxHops);
+  var bestLCA = null, bestDist = Infinity;
+  for (var id in ancA) {
+    if (ancB[id] !== undefined && !blacklist[id]) {
+      var d = Math.max(ancA[id], ancB[id]);
+      if (d < bestDist) { bestDist = d; bestLCA = id; }
+    }
+  }
+  if (bestLCA === null) return null;
+  return { lcaId: bestLCA, dist: bestDist };
+}
+
+// Union-Find
+function ufMake(n) { return { parent: new Array(n), rank: new Array(n) }; }
+function ufInit(uf, n) { for (var i = 0; i < n; i++) { uf.parent[i] = i; uf.rank[i] = 0; } }
+function ufFind(uf, x) { while (uf.parent[x] !== x) { uf.parent[x] = uf.parent[uf.parent[x]]; x = uf.parent[x]; } return x; }
+function ufUnion(uf, a, b) {
+  a = ufFind(uf, a); b = ufFind(uf, b);
+  if (a === b) return;
+  if (uf.rank[a] < uf.rank[b]) { var t = a; a = b; b = t; }
+  uf.parent[b] = a;
+  if (uf.rank[a] === uf.rank[b]) uf.rank[a]++;
+}
+
+function recomputeClusters() {
+  var maxHops = parseInt(document.getElementById('cluster-hops').value) || 0;
+  clusterMap = {};
+  clusterInfo = {};
+  if (maxHops === 0 || !hierarchyLoaded || !allRows) return;
+
+  // Collect MONDO IDs per gene and count submissions per gene+mondoId
+  var geneIds = {};      // gene -> [mondoNumericId, ...]
+  var geneIdSet = {};    // gene -> { id: true }
+  var idToTitle = {};    // mondoNumericId -> disease title (from CSV, most common)
+  var geneDiseaseCount = {}; // gene+'\t'+mondoId -> count
+
+  for (var i = 0; i < allRows.length; i++) {
+    var row = allRows[i];
+    var numId = row.diseaseCurie.replace('MONDO:', '');
+    if (!mondoNodes[numId]) continue;
+    if (!geneIdSet[row.gene]) { geneIdSet[row.gene] = {}; geneIds[row.gene] = []; }
+    if (!geneIdSet[row.gene][numId]) {
+      geneIdSet[row.gene][numId] = true;
+      geneIds[row.gene].push(numId);
+    }
+    var gdKey = row.gene + '\t' + numId;
+    geneDiseaseCount[gdKey] = (geneDiseaseCount[gdKey] || 0) + 1;
+    if (!idToTitle[numId]) idToTitle[numId] = row.disease;
+  }
+
+  // For each gene, cluster its MONDO IDs
+  for (var gene in geneIds) {
+    var ids = geneIds[gene];
+    if (ids.length < 2) continue;
+    var n = ids.length;
+    var uf = ufMake(n);
+    ufInit(uf, n);
+    var idxMap = {};
+    for (var j = 0; j < n; j++) idxMap[ids[j]] = j;
+
+    // Pairwise LCA (track LCAs per merged pair)
+    var pairLCAs = {}; // "idxA-idxB" -> lcaId
+    for (var a = 0; a < n; a++) {
+      for (var b = a + 1; b < n; b++) {
+        var lca = findLCA(ids[a], ids[b], maxHops, lcaBlacklist);
+        if (lca) {
+          ufUnion(uf, a, b);
+          pairLCAs[a + '-' + b] = lca.lcaId;
+        }
+      }
+    }
+
+    // Build clusters
+    var clusters = {}; // rootIdx -> [mondoId, ...]
+    for (var j = 0; j < n; j++) {
+      var root = ufFind(uf, j);
+      if (!clusters[root]) clusters[root] = [];
+      clusters[root].push(ids[j]);
+    }
+
+    // Only store multi-member clusters
+    clusterMap[gene] = {};
+    for (var root in clusters) {
+      var members = clusters[root];
+      if (members.length < 2) continue;
+      var clusterKey = members.slice().sort().join(',');
+
+      // Collect LCAs for this cluster
+      var lcaSet = {};
+      for (var a = 0; a < members.length; a++) {
+        for (var b = a + 1; b < members.length; b++) {
+          var ai = idxMap[members[a]], bi = idxMap[members[b]];
+          var key = Math.min(ai, bi) + '-' + Math.max(ai, bi);
+          if (pairLCAs[key]) lcaSet[pairLCAs[key]] = true;
+        }
+      }
+
+      // Choose label: if single LCA, use its name; else most-submitted disease + "(+N)"
+      var lcaIds = Object.keys(lcaSet);
+      var label;
+      if (lcaIds.length === 1 && mondoNodes[lcaIds[0]]) {
+        label = mondoNodes[lcaIds[0]].l;
+      } else {
+        // Find most-submitted member
+        var bestCount = 0, bestTitle = '';
+        for (var m = 0; m < members.length; m++) {
+          var c = geneDiseaseCount[gene + '\t' + members[m]] || 0;
+          if (c > bestCount) { bestCount = c; bestTitle = idToTitle[members[m]] || members[m]; }
+        }
+        label = bestTitle + ' (+' + (members.length - 1) + ' synonyms)';
+      }
+
+      var memberDetails = members.map(function(mid) {
+        return { id: mid, title: idToTitle[mid] || (mondoNodes[mid] ? mondoNodes[mid].l : mid) };
+      });
+
+      var infoKey = gene + '\t' + clusterKey;
+      clusterInfo[infoKey] = { label: label, members: memberDetails, lcaIds: lcaIds };
+
+      for (var m = 0; m < members.length; m++) {
+        clusterMap[gene][members[m]] = clusterKey;
+      }
+    }
+  }
+}
+
+// ===================== Render =====================
 function render() {
   var grouping = document.getElementById('grouping').value;
   var clsMode = document.getElementById('cls-mode').value;
   var filterVal = document.getElementById('filter').value.trim().toUpperCase();
   var container = document.getElementById('tables');
+  if (!container) return;
   container.innerHTML = '';
 
-  // Build the list of sections to render.
-  // In individual mode: one section per classification.
-  // In custom mode: one section per custom group (merging multiple classifications).
-  var sections; // array of { name: string, members: string[], cssClass: string }
+  var clusteringEnabled = hierarchyLoaded && parseInt(document.getElementById('cluster-hops').value) > 0;
+
+  var sections;
   if (clsMode === 'individual') {
     sections = CLASSIFICATIONS.map(function(cls) {
       return { name: cls, members: [cls], cssClass: CLS_CLASSES[cls] || '' };
     });
   } else {
     sections = customGroups.filter(function(g) { return g.members.length > 0; }).map(function(g) {
-      // Use the border color of the first member
       return { name: g.name, members: g.members.slice(), cssClass: CLS_CLASSES[g.members[0]] || '' };
     });
   }
@@ -284,44 +578,49 @@ function render() {
     var memberSet = {};
     for (var m = 0; m < sec.members.length; m++) memberSet[sec.members[m]] = 1;
 
-    // Build grouped bucket for this section
     var bucket = {};
     for (var i = 0; i < allRows.length; i++) {
       var row = allRows[i];
       if (!memberSet[row.classification]) continue;
       if (filterVal && row.gene.toUpperCase().indexOf(filterVal) === -1) continue;
 
+      var diseaseKey = row.disease;
+      if (clusteringEnabled && clusterMap[row.gene]) {
+        var numericId = row.diseaseCurie.replace('MONDO:', '');
+        var clusterId = clusterMap[row.gene][numericId];
+        if (clusterId) {
+          var info = clusterInfo[row.gene + '\t' + clusterId];
+          if (info) diseaseKey = info.label;
+        }
+      }
+
       var key;
       if (grouping === 'gene') {
         key = row.gene;
       } else if (grouping === 'gene-disease') {
-        key = row.gene + '\t' + row.disease;
+        key = row.gene + '\t' + diseaseKey;
       } else {
-        key = row.gene + '\t' + row.disease + '\t' + row.moi;
+        key = row.gene + '\t' + diseaseKey + '\t' + row.moi;
       }
 
       if (!bucket[key]) {
         bucket[key] = {
-          gene: row.gene,
-          geneCurie: row.geneCurie,
-          disease: row.disease,
-          diseaseCurie: row.diseaseCurie,
-          moi: row.moi,
-          submitters: {},
-          count: 0,
-          latestDate: ''
+          gene: row.gene, geneCurie: row.geneCurie,
+          disease: diseaseKey, diseaseCurie: row.diseaseCurie,
+          moi: row.moi, submitters: {}, count: 0, latestDate: '',
+          diseaseMembers: {}
         };
       }
       var entry = bucket[key];
       entry.submitters[row.submitter] = 1;
       entry.count++;
       if (row.date > entry.latestDate) entry.latestDate = row.date;
+      entry.diseaseMembers[row.disease] = (entry.diseaseMembers[row.disease] || 0) + 1;
     }
 
     var keys = Object.keys(bucket);
     if (keys.length === 0) continue;
     keys.sort(function(a, b) { return bucket[b].count - bucket[a].count; });
-
     renderSection(container, sec.name, sec.cssClass, bucket, keys, showDisease, showMoi);
   }
 }
@@ -342,27 +641,23 @@ function renderSection(container, title, cssClass, bucket, keys, showDisease, sh
   body.className = 'section-body';
 
   header.addEventListener('click', (function(b) {
-    return function() {
-      b.classList.toggle('hidden');
-      this.classList.toggle('collapsed');
-    };
+    return function() { b.classList.toggle('hidden'); this.classList.toggle('collapsed'); };
   })(body));
 
   var table = document.createElement('table');
   var thead = '<thead><tr>';
-  thead += '<th data-col="gene">Gene <span class="sort-arrow">&#9650;&#9660;</span></th>';
-  if (showDisease) thead += '<th data-col="disease">Disease <span class="sort-arrow">&#9650;&#9660;</span></th>';
-  if (showMoi) thead += '<th data-col="moi">MOI <span class="sort-arrow">&#9650;&#9660;</span></th>';
+  thead += '<th data-col="gene">Gene <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  if (showDisease) thead += '<th data-col="disease">Disease <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  if (showMoi) thead += '<th data-col="moi">MOI <span class="sort-arrow">\u25B2\u25BC</span></th>';
   thead += '<th data-col="submitters">Submitters</th>';
-  thead += '<th data-col="count">Count <span class="sort-arrow">&#9650;&#9660;</span></th>';
-  thead += '<th data-col="date">Latest Date <span class="sort-arrow">&#9650;&#9660;</span></th>';
+  thead += '<th data-col="count">Count <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  thead += '<th data-col="date">Latest Date <span class="sort-arrow">\u25B2\u25BC</span></th>';
   thead += '</tr></thead>';
   table.innerHTML = thead;
 
   var tbody = document.createElement('tbody');
   var limited = keys.length > MAX_ROWS;
   var showKeys = limited ? keys.slice(0, MAX_ROWS) : keys;
-
   for (var k = 0; k < showKeys.length; k++) {
     tbody.appendChild(buildRow(bucket[showKeys[k]], showDisease, showMoi));
   }
@@ -390,8 +685,7 @@ function renderSection(container, title, cssClass, bucket, keys, showDisease, sh
           var asc = th._sortDir !== 'asc';
           th._sortDir = asc ? 'asc' : 'desc';
           ks.sort(function(a, b) {
-            var ea = bkt[a], eb = bkt[b];
-            var va, vb;
+            var ea = bkt[a], eb = bkt[b], va, vb;
             if (col === 'gene') { va = ea.gene.toLowerCase(); vb = eb.gene.toLowerCase(); }
             else if (col === 'disease') { va = ea.disease.toLowerCase(); vb = eb.disease.toLowerCase(); }
             else if (col === 'moi') { va = ea.moi.toLowerCase(); vb = eb.moi.toLowerCase(); }
@@ -405,9 +699,7 @@ function renderSection(container, title, cssClass, bucket, keys, showDisease, sh
           var tb = tbl.querySelector('tbody');
           tb.innerHTML = '';
           var show = ks.length > MAX_ROWS ? ks.slice(0, MAX_ROWS) : ks;
-          for (var k = 0; k < show.length; k++) {
-            tb.appendChild(buildRow(bkt[show[k]], showD, showM));
-          }
+          for (var k = 0; k < show.length; k++) tb.appendChild(buildRow(bkt[show[k]], showD, showM));
         };
       })(ths[t]));
     }
@@ -419,7 +711,15 @@ function buildRow(entry, showDisease, showMoi) {
   var subs = Object.keys(entry.submitters).sort().join(', ');
   var hgncId = entry.geneCurie.replace('HGNC:', '');
   var html = '<td><a class="gene-link" href="https://search.thegencc.org/genes/' + encodeURIComponent(hgncId) + '" target="_blank">' + escHtml(entry.gene) + '</a></td>';
-  if (showDisease) html += '<td>' + escHtml(entry.disease) + '</td>';
+  if (showDisease) {
+    var dmKeys = Object.keys(entry.diseaseMembers || {});
+    if (dmKeys.length > 1) {
+      var tooltip = dmKeys.map(function(d) { return d + ' (' + entry.diseaseMembers[d] + ')'; }).join('\n');
+      html += '<td><span class="disease-cluster" title="' + escHtml(tooltip) + '">' + escHtml(entry.disease) + '</span></td>';
+    } else {
+      html += '<td>' + escHtml(entry.disease) + '</td>';
+    }
+  }
   if (showMoi) html += '<td>' + escHtml(entry.moi) + '</td>';
   html += '<td class="submitters">' + escHtml(subs) + '</td>';
   html += '<td>' + entry.count + '</td>';
@@ -438,11 +738,184 @@ function escHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// File input handling
+// ===================== Cluster Review Tab =====================
+function renderClusterReview() {
+  var pane = document.getElementById('tab-cluster-review');
+  pane.innerHTML = '';
+  if (!hierarchyLoaded) { pane.innerHTML = '<p style="padding:20px;color:#636e72;">Load a MONDO hierarchy file to see clusters.</p>'; return; }
+
+  // Controls
+  var ctrlDiv = document.createElement('div');
+  ctrlDiv.className = 'cr-controls';
+  ctrlDiv.innerHTML =
+    '<div><label>Gene: <input type="text" id="cr-gene-filter" placeholder="e.g. COL2A1"></label></div>' +
+    '<div><label>Disease: <input type="text" id="cr-disease-filter" placeholder="e.g. retinitis"></label></div>' +
+    '<div><label><input type="checkbox" id="cr-large-only"> 3+ members only</label></div>' +
+    '<div class="cr-stats" id="cr-stats"></div>';
+  pane.appendChild(ctrlDiv);
+
+  // Blacklist section
+  var blDiv = document.createElement('div');
+  blDiv.className = 'blacklist-section';
+  blDiv.id = 'blacklist-section';
+  pane.appendChild(blDiv);
+
+  // Cluster list container
+  var listDiv = document.createElement('div');
+  listDiv.id = 'cr-list';
+  pane.appendChild(listDiv);
+
+  renderBlacklistSection();
+  renderClusterList();
+
+  // Wire filters
+  var crTimeout;
+  function onCrFilter() { clearTimeout(crTimeout); crTimeout = setTimeout(renderClusterList, 300); }
+  document.getElementById('cr-gene-filter').addEventListener('input', onCrFilter);
+  document.getElementById('cr-disease-filter').addEventListener('input', onCrFilter);
+  document.getElementById('cr-large-only').addEventListener('change', renderClusterList);
+}
+
+function renderBlacklistSection() {
+  var blDiv = document.getElementById('blacklist-section');
+  if (!blDiv) return;
+  var blKeys = Object.keys(lcaBlacklist);
+  if (blKeys.length === 0) {
+    blDiv.innerHTML = '';
+    return;
+  }
+  var html = '<h4>Blacklisted LCA terms (' + blKeys.length + '):</h4><div>';
+  for (var i = 0; i < blKeys.length; i++) {
+    var id = blKeys[i];
+    var lbl = mondoNodes[id] ? mondoNodes[id].l : id;
+    html += '<span class="blacklist-tag" data-id="' + escHtml(id) + '" title="Click to un-blacklist">' +
+      escHtml(lbl) + ' (MONDO:' + escHtml(id) + ') \u00d7</span>';
+  }
+  html += '</div>';
+  blDiv.innerHTML = html;
+  // Wire un-blacklist clicks
+  var tags = blDiv.querySelectorAll('.blacklist-tag');
+  for (var t = 0; t < tags.length; t++) {
+    tags[t].addEventListener('click', function() {
+      delete lcaBlacklist[this.dataset.id];
+      saveBlacklist();
+      recomputeClusters();
+      render();
+      renderClusterReview();
+    });
+  }
+}
+
+function renderClusterList() {
+  var listDiv = document.getElementById('cr-list');
+  var statsDiv = document.getElementById('cr-stats');
+  if (!listDiv) return;
+  listDiv.innerHTML = '';
+
+  var geneFilter = (document.getElementById('cr-gene-filter') || {}).value || '';
+  geneFilter = geneFilter.trim().toUpperCase();
+  var diseaseFilter = (document.getElementById('cr-disease-filter') || {}).value || '';
+  diseaseFilter = diseaseFilter.trim().toLowerCase();
+  var largeOnly = (document.getElementById('cr-large-only') || {}).checked;
+
+  // Collect all clusters
+  var allClusters = [];
+  for (var key in clusterInfo) {
+    var parts = key.split('\t');
+    var gene = parts[0], clusterKey = parts[1];
+    var info = clusterInfo[key];
+
+    if (geneFilter && gene.toUpperCase().indexOf(geneFilter) === -1) continue;
+    if (largeOnly && info.members.length < 3) continue;
+    if (diseaseFilter) {
+      var match = false;
+      for (var m = 0; m < info.members.length; m++) {
+        if (info.members[m].title.toLowerCase().indexOf(diseaseFilter) !== -1) { match = true; break; }
+      }
+      if (!match) continue;
+    }
+
+    allClusters.push({ gene: gene, key: clusterKey, info: info });
+  }
+
+  // Sort by cluster size descending
+  allClusters.sort(function(a, b) { return b.info.members.length - a.info.members.length; });
+
+  if (statsDiv) statsDiv.textContent = allClusters.length + ' clusters shown';
+
+  var MAX_CARDS = 200;
+  var showing = Math.min(allClusters.length, MAX_CARDS);
+  for (var c = 0; c < showing; c++) {
+    var cl = allClusters[c];
+    var card = document.createElement('div');
+    card.className = 'cluster-card';
+
+    var membersHtml = cl.info.members.map(function(m) {
+      return escHtml(m.title) + ' <span class="cc-member-id">MONDO:' + escHtml(m.id) + '</span>';
+    }).join('<br>');
+
+    var lcaHtml = '';
+    if (cl.info.lcaIds.length > 0) {
+      lcaHtml = '<div class="cc-lca">LCA: ';
+      for (var l = 0; l < cl.info.lcaIds.length; l++) {
+        var lid = cl.info.lcaIds[l];
+        var llbl = mondoNodes[lid] ? mondoNodes[lid].l : lid;
+        lcaHtml += '<span class="cc-lca-label">' + escHtml(llbl) + '</span> <span class="cc-member-id">MONDO:' + escHtml(lid) + '</span>';
+        if (!lcaBlacklist[lid]) {
+          lcaHtml += '<button class="btn-blacklist" data-id="' + escHtml(lid) + '">blacklist</button>';
+        }
+        if (l < cl.info.lcaIds.length - 1) lcaHtml += ', ';
+      }
+      lcaHtml += '</div>';
+    }
+
+    card.innerHTML =
+      '<div class="cc-header"><div><span class="cc-gene">' + escHtml(cl.gene) + '</span> ' +
+      '<span class="cc-label">' + escHtml(cl.info.label) + '</span></div>' +
+      '<span class="cc-size">' + cl.info.members.length + ' diseases</span></div>' +
+      '<div class="cc-members">' + membersHtml + '</div>' + lcaHtml;
+
+    listDiv.appendChild(card);
+  }
+
+  if (allClusters.length > MAX_CARDS) {
+    var note = document.createElement('div');
+    note.className = 'max-rows-note';
+    note.textContent = 'Showing ' + MAX_CARDS + ' of ' + allClusters.length + ' clusters. Use filters to narrow.';
+    listDiv.appendChild(note);
+  }
+
+  // Wire blacklist buttons
+  var btns = listDiv.querySelectorAll('.btn-blacklist');
+  for (var b = 0; b < btns.length; b++) {
+    btns[b].addEventListener('click', function(e) {
+      e.stopPropagation();
+      lcaBlacklist[this.dataset.id] = true;
+      saveBlacklist();
+      recomputeClusters();
+      render();
+      renderClusterReview();
+    });
+  }
+}
+
+// ===================== Tab System =====================
+document.addEventListener('click', function(e) {
+  if (!e.target.classList.contains('tab-btn')) return;
+  var tabId = e.target.dataset.tab;
+  var btns = document.querySelectorAll('.tab-btn');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+  e.target.classList.add('active');
+  var panes = document.querySelectorAll('.tab-pane');
+  for (var i = 0; i < panes.length; i++) panes[i].classList.remove('active');
+  document.getElementById('tab-' + tabId).classList.add('active');
+  if (tabId === 'cluster-review' && hierarchyLoaded) renderClusterReview();
+});
+
+// ===================== File Input Handling =====================
 document.getElementById('browse-link').addEventListener('click', function() {
   document.getElementById('file-input').click();
 });
-
 document.getElementById('file-input').addEventListener('change', function(e) {
   if (e.target.files.length) readFile(e.target.files[0]);
 });
@@ -451,34 +924,46 @@ var dropZone = document.getElementById('drop-zone');
 dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('drag-over'); });
 dropZone.addEventListener('drop', function(e) {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
+  e.preventDefault(); dropZone.classList.remove('drag-over');
   if (e.dataTransfer.files.length) readFile(e.dataTransfer.files[0]);
 });
 
 function readFile(file) {
-  dropZone.innerHTML = '<p>Loading...</p>';
+  dropZone.innerHTML = '<p>Loading CSV...</p>';
   var reader = new FileReader();
   reader.onload = function(e) { loadData(e.target.result); };
   reader.readAsText(file);
 }
 
-// --- Classification group editor ---
+// MONDO file input
+document.getElementById('mondo-browse-link').addEventListener('click', function() {
+  document.getElementById('mondo-file-input').click();
+});
+document.getElementById('mondo-file-input').addEventListener('change', function(e) {
+  if (e.target.files.length) readMondoFile(e.target.files[0]);
+});
 
-function initGroups() {
-  customGroups = DEFAULT_GROUPS.map(function(g) {
-    return { name: g.name, members: g.members.slice() };
-  });
+var mondoDropZone = document.getElementById('mondo-drop-zone');
+mondoDropZone.addEventListener('dragover', function(e) { e.preventDefault(); mondoDropZone.classList.add('drag-over'); });
+mondoDropZone.addEventListener('dragleave', function() { mondoDropZone.classList.remove('drag-over'); });
+mondoDropZone.addEventListener('drop', function(e) {
+  e.preventDefault(); mondoDropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length) readMondoFile(e.dataTransfer.files[0]);
+});
+
+function readMondoFile(file) {
+  mondoDropZone.innerHTML = '<p>Loading MONDO hierarchy...</p>';
+  var reader = new FileReader();
+  reader.onload = function(e) { loadHierarchy(e.target.result); };
+  reader.readAsText(file);
 }
-initGroups();
 
+// ===================== Classification Group Editor =====================
 function getAssignedSet() {
   var assigned = {};
-  for (var g = 0; g < customGroups.length; g++) {
-    for (var m = 0; m < customGroups[g].members.length; m++) {
+  for (var g = 0; g < customGroups.length; g++)
+    for (var m = 0; m < customGroups[g].members.length; m++)
       assigned[customGroups[g].members[m]] = 1;
-    }
-  }
   return assigned;
 }
 
@@ -486,34 +971,22 @@ function renderGroupEditor() {
   var assigned = getAssignedSet();
   var unassigned = CLASSIFICATIONS.filter(function(c) { return !assigned[c]; });
 
-  // Render unassigned pool
   var poolEl = document.getElementById('unassigned-tags');
   poolEl.innerHTML = '';
   var poolLabel = document.querySelector('#unassigned-pool .label');
-  if (unassigned.length === 0) {
-    poolLabel.textContent = 'All classifications assigned.';
-  } else {
-    poolLabel.textContent = 'Unassigned \u2014 click a tag, then click a group to add it:';
-  }
+  poolLabel.textContent = unassigned.length === 0 ? 'All classifications assigned.' : 'Unassigned \u2014 click a tag, then click a group to add it:';
   for (var u = 0; u < unassigned.length; u++) {
     var tag = document.createElement('span');
     tag.className = 'group-tag available';
     tag.textContent = unassigned[u];
-    tag.dataset.cls = unassigned[u];
     tag.addEventListener('click', (function(cls) {
       return function() {
-        // Add to first group that exists, or prompt
-        if (customGroups.length > 0) {
-          customGroups[0].members.push(cls);
-          renderGroupEditor();
-          if (allRows) render();
-        }
+        if (customGroups.length > 0) { customGroups[0].members.push(cls); renderGroupEditor(); if (allRows) render(); }
       };
     })(unassigned[u]));
     poolEl.appendChild(tag);
   }
 
-  // Render group rows
   var rowsEl = document.getElementById('group-rows');
   rowsEl.innerHTML = '';
   for (var g = 0; g < customGroups.length; g++) {
@@ -521,15 +994,9 @@ function renderGroupEditor() {
       var group = customGroups[gi];
       var row = document.createElement('div');
       row.className = 'group-row';
-
       var nameInput = document.createElement('input');
-      nameInput.type = 'text';
-      nameInput.value = group.name;
-      nameInput.addEventListener('input', function() {
-        group.name = this.value;
-        if (allRows) render();
-      });
-
+      nameInput.type = 'text'; nameInput.value = group.name;
+      nameInput.addEventListener('input', function() { group.name = this.value; if (allRows) render(); });
       var tagsDiv = document.createElement('div');
       tagsDiv.className = 'group-tags';
       for (var m = 0; m < group.members.length; m++) {
@@ -537,43 +1004,25 @@ function renderGroupEditor() {
           var tag = document.createElement('span');
           tag.className = 'group-tag in-group ' + (TAG_CLASSES[cls] || '');
           tag.textContent = cls + ' \u00d7';
-          tag.title = 'Click to remove from group';
+          tag.title = 'Click to remove';
           tag.addEventListener('click', function() {
             group.members = group.members.filter(function(x) { return x !== cls; });
-            renderGroupEditor();
-            if (allRows) render();
+            renderGroupEditor(); if (allRows) render();
           });
           tagsDiv.appendChild(tag);
         })(group.members[m]);
       }
-
-      // Drop target for unassigned tags
       var addBtn = document.createElement('span');
-      addBtn.className = 'group-tag available';
-      addBtn.textContent = '+ add';
-      addBtn.title = 'Click to add next unassigned classification';
+      addBtn.className = 'group-tag available'; addBtn.textContent = '+ add';
       addBtn.addEventListener('click', function() {
         var unass = CLASSIFICATIONS.filter(function(c) { return !getAssignedSet()[c]; });
-        if (unass.length > 0) {
-          group.members.push(unass[0]);
-          renderGroupEditor();
-          if (allRows) render();
-        }
+        if (unass.length > 0) { group.members.push(unass[0]); renderGroupEditor(); if (allRows) render(); }
       });
       tagsDiv.appendChild(addBtn);
-
       var removeBtn = document.createElement('button');
-      removeBtn.className = 'remove-group';
-      removeBtn.textContent = 'Remove';
-      removeBtn.addEventListener('click', function() {
-        customGroups.splice(gi, 1);
-        renderGroupEditor();
-        if (allRows) render();
-      });
-
-      row.appendChild(nameInput);
-      row.appendChild(tagsDiv);
-      row.appendChild(removeBtn);
+      removeBtn.className = 'remove-group'; removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', function() { customGroups.splice(gi, 1); renderGroupEditor(); if (allRows) render(); });
+      row.appendChild(nameInput); row.appendChild(tagsDiv); row.appendChild(removeBtn);
       rowsEl.appendChild(row);
     })(g);
   }
@@ -581,28 +1030,24 @@ function renderGroupEditor() {
 
 document.getElementById('cls-mode').addEventListener('change', function() {
   var editor = document.getElementById('group-editor');
-  if (this.value === 'custom') {
-    editor.classList.add('visible');
-    renderGroupEditor();
-  } else {
-    editor.classList.remove('visible');
-  }
+  if (this.value === 'custom') { editor.classList.add('visible'); renderGroupEditor(); }
+  else editor.classList.remove('visible');
   if (allRows) render();
 });
-
 document.getElementById('add-group-btn').addEventListener('click', function() {
-  customGroups.push({ name: 'Group ' + (customGroups.length + 1), members: [] });
-  renderGroupEditor();
+  customGroups.push({ name: 'Group ' + (customGroups.length + 1), members: [] }); renderGroupEditor();
 });
-
 document.getElementById('reset-groups-btn').addEventListener('click', function() {
-  initGroups();
-  renderGroupEditor();
-  if (allRows) render();
+  initGroups(); renderGroupEditor(); if (allRows) render();
 });
 
-// Re-render on control changes
+// ===================== Control Change Handlers =====================
 document.getElementById('grouping').addEventListener('change', function() { if (allRows) render(); });
+document.getElementById('cluster-hops').addEventListener('change', function() {
+  recomputeClusters();
+  if (allRows) render();
+  if (document.getElementById('tab-cluster-review').classList.contains('active')) renderClusterReview();
+});
 var filterTimeout;
 document.getElementById('filter').addEventListener('input', function() {
   clearTimeout(filterTimeout);
