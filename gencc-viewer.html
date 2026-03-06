@@ -12,6 +12,7 @@
   .controls { background: #fff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
   .controls label { font-weight: 600; font-size: 0.85rem; }
   .controls select, .controls input[type="text"] { padding: 6px 10px; border: 1px solid #b2bec3; border-radius: 4px; font-size: 0.85rem; }
+  .controls select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f2f6; }
   .controls input[type="text"] { width: 200px; }
   #stats { color: #636e72; font-size: 0.85rem; }
   .section { margin-bottom: 20px; }
@@ -135,6 +136,7 @@
       <select id="cls-mode">
         <option value="individual">Individual</option>
         <option value="custom">Custom groups</option>
+        <option value="conflicts">Conflicts</option>
       </select>
     </div>
     <div id="cluster-ctrl" class="hidden-ctrl">
@@ -234,6 +236,8 @@ var TAG_CLASSES = {
   'Disputed Evidence': 'tag-disputed', 'Refuted Evidence': 'tag-refuted',
   'No Known Disease Relationship': 'tag-noknown'
 };
+
+var STRONG_EVIDENCE = { 'Definitive': 1, 'Strong': 1, 'Moderate': 1 };
 
 // ===================== State =====================
 var customGroups = [];
@@ -562,6 +566,11 @@ function render() {
 
   var clusteringEnabled = hierarchyLoaded && parseInt(document.getElementById('cluster-hops').value) > 0;
 
+  if (clsMode === 'conflicts') {
+    renderConflicts(container, filterVal, clusteringEnabled);
+    return;
+  }
+
   var sections;
   if (clsMode === 'individual') {
     sections = CLASSIFICATIONS.map(function(cls) {
@@ -735,6 +744,188 @@ function countTotal(bucket, keys) {
   var t = 0;
   for (var i = 0; i < keys.length; i++) t += bucket[keys[i]].count;
   return t;
+}
+
+// ===================== Conflict View =====================
+function renderConflicts(container, filterVal, clusteringEnabled) {
+  var MAX_ROWS = 500;
+
+  // Step 1: Bucket all submissions by gene-disease-moi triple
+  var triples = {};
+  for (var i = 0; i < allRows.length; i++) {
+    var row = allRows[i];
+    if (filterVal && row.gene.toUpperCase().indexOf(filterVal) === -1) continue;
+
+    var diseaseKey = row.disease;
+    if (clusteringEnabled && clusterMap[row.gene]) {
+      var numericId = row.diseaseCurie.replace('MONDO:', '');
+      var clusterId = clusterMap[row.gene][numericId];
+      if (clusterId) {
+        var info = clusterInfo[row.gene + '\t' + clusterId];
+        if (info) diseaseKey = info.label;
+      }
+    }
+
+    var key = row.gene + '\t' + diseaseKey + '\t' + row.moi;
+    if (!triples[key]) {
+      triples[key] = {
+        gene: row.gene, geneCurie: row.geneCurie,
+        disease: diseaseKey, diseaseCurie: row.diseaseCurie,
+        moi: row.moi,
+        strong: {},    // submitter -> { classification: true }
+        other: {},     // submitter -> { classification: true }
+        strongCount: 0, otherCount: 0, totalCount: 0,
+        diseaseMembers: {}
+      };
+    }
+    var entry = triples[key];
+    entry.totalCount++;
+    entry.diseaseMembers[row.disease] = (entry.diseaseMembers[row.disease] || 0) + 1;
+
+    if (STRONG_EVIDENCE[row.classification]) {
+      if (!entry.strong[row.submitter]) entry.strong[row.submitter] = {};
+      entry.strong[row.submitter][row.classification] = true;
+      entry.strongCount++;
+    } else {
+      if (!entry.other[row.submitter]) entry.other[row.submitter] = {};
+      entry.other[row.submitter][row.classification] = true;
+      entry.otherCount++;
+    }
+  }
+
+  // Step 2: Filter to only conflicting triples
+  var conflictKeys = [];
+  for (var k in triples) {
+    if (triples[k].strongCount > 0 && triples[k].otherCount > 0) {
+      conflictKeys.push(k);
+    }
+  }
+
+  // Step 3: Sort by total count descending
+  conflictKeys.sort(function(a, b) { return triples[b].totalCount - triples[a].totalCount; });
+
+  // Step 4: Update stats
+  var totalSubs = 0;
+  for (var j = 0; j < conflictKeys.length; j++) totalSubs += triples[conflictKeys[j]].totalCount;
+  var conflictWord = conflictKeys.length === 1 ? ' conflict' : ' conflicts';
+  document.getElementById('stats').textContent =
+    allRows.length.toLocaleString() + ' submissions, ' +
+    conflictKeys.length.toLocaleString() + conflictWord;
+
+  // Step 5: Render
+  if (conflictKeys.length === 0) {
+    container.innerHTML = '<div class="section"><div class="section-header"><h2>Conflicts</h2><div><span class="count">0 conflicts</span></div></div></div>';
+    return;
+  }
+
+  var section = document.createElement('div');
+  section.className = 'section';
+
+  var header = document.createElement('div');
+  header.className = 'section-header';
+  header.innerHTML = '<h2>Conflicts</h2>' +
+    '<div><span class="count">' + conflictKeys.length.toLocaleString() + conflictWord + ', ' +
+    totalSubs.toLocaleString() + ' submissions</span> ' +
+    '<span class="arrow">&#9660;</span></div>';
+
+  var body = document.createElement('div');
+  body.className = 'section-body';
+  header.addEventListener('click', (function(b) {
+    return function() { b.classList.toggle('hidden'); this.classList.toggle('collapsed'); };
+  })(body));
+
+  var table = document.createElement('table');
+  var thead = '<thead><tr>';
+  thead += '<th data-col="gene">Gene <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  thead += '<th data-col="disease">Disease <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  thead += '<th data-col="moi">MOI <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  thead += '<th data-col="strong">Strong Evidence <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  thead += '<th data-col="other">Other Evidence <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  thead += '<th data-col="total">Total <span class="sort-arrow">\u25B2\u25BC</span></th>';
+  thead += '</tr></thead>';
+  table.innerHTML = thead;
+
+  var tbody = document.createElement('tbody');
+  var limited = conflictKeys.length > MAX_ROWS;
+  var showKeys = limited ? conflictKeys.slice(0, MAX_ROWS) : conflictKeys;
+  for (var r = 0; r < showKeys.length; r++) {
+    tbody.appendChild(buildConflictRow(triples[showKeys[r]]));
+  }
+  table.appendChild(tbody);
+  body.appendChild(table);
+
+  if (limited) {
+    var note = document.createElement('div');
+    note.className = 'max-rows-note';
+    note.textContent = 'Showing ' + MAX_ROWS + ' of ' + conflictKeys.length.toLocaleString() + ' rows. Use the filter to narrow results.';
+    body.appendChild(note);
+  }
+
+  section.appendChild(header);
+  section.appendChild(body);
+  container.appendChild(section);
+
+  // Column sorting
+  (function(tbl, data, ks) {
+    var ths = tbl.querySelectorAll('thead th');
+    for (var t = 0; t < ths.length; t++) {
+      ths[t].addEventListener('click', (function(th) {
+        return function() {
+          var col = th.getAttribute('data-col');
+          var asc = th._sortDir !== 'asc';
+          th._sortDir = asc ? 'asc' : 'desc';
+          ks.sort(function(a, b) {
+            var ea = data[a], eb = data[b], va, vb;
+            if (col === 'gene') { va = ea.gene.toLowerCase(); vb = eb.gene.toLowerCase(); }
+            else if (col === 'disease') { va = ea.disease.toLowerCase(); vb = eb.disease.toLowerCase(); }
+            else if (col === 'moi') { va = ea.moi.toLowerCase(); vb = eb.moi.toLowerCase(); }
+            else if (col === 'strong') { va = ea.strongCount; vb = eb.strongCount; }
+            else if (col === 'other') { va = ea.otherCount; vb = eb.otherCount; }
+            else if (col === 'total') { va = ea.totalCount; vb = eb.totalCount; }
+            else return 0;
+            if (va < vb) return asc ? -1 : 1;
+            if (va > vb) return asc ? 1 : -1;
+            return 0;
+          });
+          var tb = tbl.querySelector('tbody');
+          tb.innerHTML = '';
+          var show = ks.length > MAX_ROWS ? ks.slice(0, MAX_ROWS) : ks;
+          for (var r = 0; r < show.length; r++) tb.appendChild(buildConflictRow(data[show[r]]));
+        };
+      })(ths[t]));
+    }
+  })(table, triples, conflictKeys);
+}
+
+function formatEvidence(submitterMap) {
+  var parts = [];
+  var subs = Object.keys(submitterMap).sort();
+  for (var i = 0; i < subs.length; i++) {
+    var clsList = Object.keys(submitterMap[subs[i]]).sort().join(', ');
+    parts.push(subs[i] + ': ' + clsList);
+  }
+  return parts.join('; ');
+}
+
+function buildConflictRow(entry) {
+  var tr = document.createElement('tr');
+  var hgncId = entry.geneCurie.replace('HGNC:', '');
+  var html = '<td><a class="gene-link" href="https://search.thegencc.org/genes/' + encodeURIComponent(hgncId) + '" target="_blank">' + escHtml(entry.gene) + '</a></td>';
+
+  var dmKeys = Object.keys(entry.diseaseMembers || {});
+  if (dmKeys.length > 1) {
+    var tooltip = dmKeys.map(function(d) { return d + ' (' + entry.diseaseMembers[d] + ')'; }).join('\n');
+    html += '<td><span class="disease-cluster" title="' + escHtml(tooltip) + '">' + escHtml(entry.disease) + '</span></td>';
+  } else {
+    html += '<td>' + escHtml(entry.disease) + '</td>';
+  }
+
+  html += '<td>' + escHtml(entry.moi) + '</td>';
+  html += '<td class="submitters">' + escHtml(formatEvidence(entry.strong)) + '</td>';
+  html += '<td class="submitters">' + escHtml(formatEvidence(entry.other)) + '</td>';
+  html += '<td>' + entry.totalCount + '</td>';
+  tr.innerHTML = html;
+  return tr;
 }
 
 function escHtml(s) {
@@ -1123,8 +1314,15 @@ function renderGroupEditor() {
 
 document.getElementById('cls-mode').addEventListener('change', function() {
   var editor = document.getElementById('group-editor');
+  var groupingSelect = document.getElementById('grouping');
   if (this.value === 'custom') { editor.classList.add('visible'); renderGroupEditor(); }
   else editor.classList.remove('visible');
+  if (this.value === 'conflicts') {
+    groupingSelect.value = 'gene-disease-moi';
+    groupingSelect.disabled = true;
+  } else {
+    groupingSelect.disabled = false;
+  }
   if (allRows) render();
 });
 document.getElementById('add-group-btn').addEventListener('click', function() {
