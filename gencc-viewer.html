@@ -98,7 +98,10 @@
   .cluster-review .cr-controls label { font-size: 0.82rem; display: flex; align-items: center; gap: 4px; }
   .cr-stats { font-size: 0.82rem; color: #636e72; }
   .blacklist-section { margin-bottom: 16px; }
-  .blacklist-section h4 { font-size: 0.85rem; margin-bottom: 6px; }
+  .blacklist-section h4 { font-size: 0.85rem; margin-bottom: 6px; cursor: pointer; user-select: none; }
+  .blacklist-section h4 .arrow { font-size: 0.8rem; transition: transform 0.2s; display: inline-block; margin-right: 4px; }
+  .blacklist-section h4.collapsed .arrow { transform: rotate(-90deg); }
+  .blacklist-section .bl-body.hidden { display: none; }
   .blacklist-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; font-size: 0.78rem; background: #e17055; color: #fff; cursor: pointer; margin: 2px; }
   .blacklist-tag:hover { opacity: 0.85; }
   .cluster-card { border: 1px solid #dfe6e9; border-radius: 6px; margin-bottom: 8px; padding: 10px 14px; }
@@ -118,6 +121,11 @@
   .btn-blacklist:hover { background: #e17055; color: #fff; }
   .disease-cluster { border-bottom: 1px dashed #dfe6e9; cursor: help; }
   .hidden-ctrl { display: none; }
+  #auto-resolve-overlaps { font-size: 0.8rem; padding: 4px 10px; border: 1px solid #b2bec3; border-radius: 4px; background: #fff; cursor: pointer; }
+  #auto-resolve-overlaps:hover:not(:disabled) { background: #dfe6e9; }
+  #auto-resolve-overlaps:disabled { opacity: 0.4; cursor: default; }
+  #clear-blacklist { font-size: 0.75rem; padding: 2px 8px; border: 1px solid #b2bec3; border-radius: 4px; background: #fff; cursor: pointer; margin-left: 8px; vertical-align: middle; }
+  #clear-blacklist:hover { background: #dfe6e9; }
 </style>
 </head>
 <body>
@@ -156,6 +164,7 @@
         <option value="2">2 hops</option>
         <option value="3">3 hops</option>
       </select>
+      <button id="auto-resolve-overlaps" disabled>Auto-resolve overlaps</button>
     </div>
     <div>
       <label for="filter">Filter gene:</label>
@@ -332,6 +341,7 @@ function loadData(text) {
     document.getElementById('tab-submissions').appendChild(t);
   }
   if (hierarchyLoaded) recomputeClusters();
+  updateAutoResolveBtn();
   render();
 }
 
@@ -402,6 +412,7 @@ function loadHierarchy(jsonText) {
     '<p>MONDO hierarchy loaded: ' + nodeCount.toLocaleString() + ' disease nodes.</p>';
   document.getElementById('cluster-ctrl').classList.remove('hidden-ctrl');
   document.getElementById('tab-btn-cluster').style.display = '';
+  updateAutoResolveBtn();
 
   if (allRows) {
     recomputeClusters();
@@ -561,6 +572,84 @@ function recomputeClusters() {
         clusterMap[gene][members[m]] = clusterKey;
       }
     }
+  }
+}
+
+function autoResolveOverlaps() {
+  var MAX_ROUNDS = 20;
+
+  for (var round = 0; round < MAX_ROUNDS; round++) {
+    // Step 1: Detect overlaps — bucket by gene+clusteredDisease+moi
+    var buckets = {};
+    for (var i = 0; i < allRows.length; i++) {
+      var row = allRows[i];
+      if (!row.diseaseCurie || row.diseaseCurie.indexOf('MONDO:') !== 0) continue;
+      var numericId = row.diseaseCurie.replace('MONDO:', '');
+      var diseaseKey = row.disease;
+      if (clusterMap[row.gene]) {
+        var clusterId = clusterMap[row.gene][numericId];
+        if (clusterId) {
+          var ci = clusterInfo[row.gene + '\t' + clusterId];
+          if (ci) diseaseKey = ci.label;
+        }
+      }
+      var bkey = row.gene + '\t' + diseaseKey + '\t' + row.moi;
+      if (!buckets[bkey]) buckets[bkey] = { gene: row.gene, submitterIds: {} };
+      var b = buckets[bkey];
+      if (!b.submitterIds[row.submitter]) b.submitterIds[row.submitter] = {};
+      b.submitterIds[row.submitter][numericId] = true;
+    }
+
+    // Step 2: For each overlapping bucket, collect LCAs from its cluster(s),
+    // scored by how many overlapping buckets each LCA participates in.
+    var lcaScores = {};
+    var overlapCount = 0;
+    for (var bkey in buckets) {
+      var b = buckets[bkey];
+      var hasOverlap = false;
+      for (var sub in b.submitterIds) {
+        if (Object.keys(b.submitterIds[sub]).length > 1) { hasOverlap = true; break; }
+      }
+      if (!hasOverlap) continue;
+      overlapCount++;
+
+      var seenClusters = {};
+      for (var sub in b.submitterIds) {
+        for (var mid in b.submitterIds[sub]) {
+          if (clusterMap[b.gene] && clusterMap[b.gene][mid]) {
+            var ck = clusterMap[b.gene][mid];
+            if (!seenClusters[ck]) {
+              seenClusters[ck] = true;
+              var ci = clusterInfo[b.gene + '\t' + ck];
+              if (ci) {
+                for (var l = 0; l < ci.lcaIds.length; l++) {
+                  lcaScores[ci.lcaIds[l]] = (lcaScores[ci.lcaIds[l]] || 0) + 1;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (overlapCount === 0) break;
+
+    // Step 3: Blacklist all scored LCAs at once, then recompute.
+    // This resolves all current overlaps in one recompute pass.
+    // Subsequent rounds handle any new overlaps from re-formed clusters.
+    var added = false;
+    for (var lid in lcaScores) {
+      if (!lcaBlacklist[lid]) { lcaBlacklist[lid] = true; added = true; }
+    }
+    if (!added) break;
+
+    recomputeClusters();
+  }
+
+  saveBlacklist();
+  render();
+  if (document.querySelector('.tab-btn.active[data-tab="cluster-review"]')) {
+    renderClusterReview();
   }
 }
 
@@ -1113,17 +1202,44 @@ function renderBlacklistSection() {
     blDiv.innerHTML = '';
     return;
   }
-  var html = '<h4>Blacklisted LCA terms (' + blKeys.length + '):</h4><div>';
+
+  blDiv.innerHTML = '';
+
+  var heading = document.createElement('h4');
+  heading.className = 'collapsed';
+  heading.innerHTML = '<span class="arrow">&#9660;</span> Blacklisted LCA terms (' + blKeys.length + '): ';
+  var clearBtn = document.createElement('button');
+  clearBtn.id = 'clear-blacklist';
+  clearBtn.textContent = 'Clear all';
+  heading.appendChild(clearBtn);
+
+  var body = document.createElement('div');
+  body.className = 'bl-body hidden';
+  var tagsHtml = '';
   for (var i = 0; i < blKeys.length; i++) {
     var id = blKeys[i];
     var lbl = mondoNodes[id] ? mondoNodes[id].l : id;
-    html += '<span class="blacklist-tag" data-id="' + escHtml(id) + '" title="Click to un-blacklist">' +
+    tagsHtml += '<span class="blacklist-tag" data-id="' + escHtml(id) + '" title="Click to un-blacklist">' +
       escHtml(lbl) + ' (MONDO:' + escHtml(id) + ') \u00d7</span>';
   }
-  html += '</div>';
-  blDiv.innerHTML = html;
-  // Wire un-blacklist clicks
-  var tags = blDiv.querySelectorAll('.blacklist-tag');
+  body.innerHTML = tagsHtml;
+
+  heading.addEventListener('click', function(e) {
+    if (e.target.id === 'clear-blacklist') return;
+    heading.classList.toggle('collapsed');
+    body.classList.toggle('hidden');
+  });
+
+  clearBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    lcaBlacklist = {};
+    saveBlacklist();
+    recomputeClusters();
+    render();
+    renderClusterReview();
+  });
+
+  var tags = body.querySelectorAll('.blacklist-tag');
   for (var t = 0; t < tags.length; t++) {
     tags[t].addEventListener('click', function() {
       delete lcaBlacklist[this.dataset.id];
@@ -1133,6 +1249,9 @@ function renderBlacklistSection() {
       renderClusterReview();
     });
   }
+
+  blDiv.appendChild(heading);
+  blDiv.appendChild(body);
 }
 
 function buildClusterTree(info) {
@@ -1467,12 +1586,22 @@ document.getElementById('reset-groups-btn').addEventListener('click', function()
   initGroups(); renderGroupEditor(); if (allRows) render();
 });
 
+function updateAutoResolveBtn() {
+  var btn = document.getElementById('auto-resolve-overlaps');
+  btn.disabled = !(hierarchyLoaded && allRows && allRows.length > 0 && parseInt(document.getElementById('cluster-hops').value) > 0);
+}
+
 // ===================== Control Change Handlers =====================
 document.getElementById('grouping').addEventListener('change', function() { if (allRows) render(); });
 document.getElementById('cluster-hops').addEventListener('change', function() {
   recomputeClusters();
+  updateAutoResolveBtn();
   if (allRows) render();
   if (document.getElementById('tab-cluster-review').classList.contains('active')) renderClusterReview();
+});
+document.getElementById('auto-resolve-overlaps').addEventListener('click', function() {
+  autoResolveOverlaps();
+  updateAutoResolveBtn();
 });
 var filterTimeout;
 document.getElementById('filter').addEventListener('input', function() {
